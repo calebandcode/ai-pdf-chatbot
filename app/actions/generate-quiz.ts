@@ -24,6 +24,61 @@ function createQuizTitle(difficulty: QuizDifficulty) {
   return "Deep Dive Challenge";
 }
 
+function buildPlaceholderQuestion({
+  chunk,
+  index,
+  difficulty,
+}: {
+  chunk: { documentId: string; page: number; content: string };
+  index: number;
+  difficulty: QuizDifficulty;
+}) {
+  const snippet = chunk.content.slice(0, 220).trim();
+  const prompt =
+    snippet.length > 0
+      ? `Based on page ${chunk.page}, what best summarizes this passage?\n\n"${snippet}${snippet.length >= 220 ? "…" : ""}"`
+      : `Review page ${chunk.page} and choose the best summary.`;
+
+  const options = [
+    {
+      id: `option-${index}-a`,
+      label: "A",
+      text: "Highlights the main idea accurately.",
+    },
+    {
+      id: `option-${index}-b`,
+      label: "B",
+      text: "Focuses on a minor detail instead of the main point.",
+    },
+    {
+      id: `option-${index}-c`,
+      label: "C",
+      text: "Contradicts the author's viewpoint.",
+    },
+    {
+      id: `option-${index}-d`,
+      label: "D",
+      text: "Introduces information not found in the passage.",
+    },
+  ];
+
+  return {
+    prompt,
+    difficulty,
+    options,
+    correct: options[0].id,
+    explanation:
+      "Option A best reflects the central idea presented in the selected passage.",
+    rationales: [],
+    sourceRefs: [
+      {
+        documentId: chunk.documentId,
+        page: chunk.page,
+      },
+    ],
+  };
+}
+
 export async function generateQuiz({
   documentIds,
   difficulty,
@@ -62,24 +117,25 @@ export async function generateQuiz({
     difficulty,
   });
 
-  // TODO: Populate real questions; for v1 just register placeholders.
-  if (questionCount > 0) {
+  const selectedChunks =
+    questionCount >= chunks.length
+      ? chunks
+      : chunks.slice(0, questionCount);
+
+  if (selectedChunks.length > 0) {
+    const questionsPayload = selectedChunks.map((chunk, index) =>
+      buildPlaceholderQuestion({ chunk, index, difficulty })
+    );
+
     await saveQuizQuestions({
       quizId: quiz.id,
-      questions: Array.from({ length: questionCount }).map((_, index) => ({
-        prompt: `Placeholder question ${index + 1}`,
-        difficulty,
-        options: [],
-        correct: "TBD",
-        explanation: "Detailed quiz explanations are coming soon.",
-        rationales: [],
-        sourceRefs: [],
-      })),
+      questions: questionsPayload,
     });
   }
 
   return {
     quizId: quiz.id,
     count: questionCount,
+    title: quiz.title ?? createQuizTitle(difficulty),
   };
 }

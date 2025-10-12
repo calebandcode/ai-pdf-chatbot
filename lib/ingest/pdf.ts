@@ -1,5 +1,3 @@
-import pdfParse from "pdf-parse";
-
 export type PdfPageText = {
   page: number;
   text: string;
@@ -7,6 +5,20 @@ export type PdfPageText = {
 
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+// Lazy load pdf-parse to avoid initialization issues
+let pdfParse: any = null;
+
+async function getPdfParse() {
+  if (!pdfParse) {
+    try {
+      pdfParse = (await import("pdf-parse")).default;
+    } catch (error) {
+      throw new Error(`Failed to load pdf-parse library: ${error}`);
+    }
+  }
+  return pdfParse;
 }
 
 export async function extractPdfPages(
@@ -18,33 +30,46 @@ export async function extractPdfPages(
 
   const pages: PdfPageText[] = [];
 
-  await pdfParse(buffer, {
-    pagerender: async (pageData) => {
-      const textContent = await pageData.getTextContent();
-      const items = textContent.items as Array<{ str?: string }>;
-      const pageText = normalizeWhitespace(
-        items
-          .map((item) => {
-            if (typeof item.str === "string") {
-              return item.str;
-            }
-            return "";
-          })
-          .join(" ")
-      );
+  try {
+    const pdfParseLib = await getPdfParse();
 
-      const pageNumber =
-        // @ts-expect-error pdf-parse runtime shape
-        typeof pageData.pageNumber === "number"
-          ? // @ts-expect-error pdf-parse runtime shape
-            pageData.pageNumber
-          : pages.length + 1;
+    await pdfParseLib(buffer, {
+      pagerender: async (pageData: any) => {
+        try {
+          const textContent = await pageData.getTextContent();
+          const items = textContent.items as Array<{ str?: string }>;
+          const pageText = normalizeWhitespace(
+            items
+              .map((item) => {
+                if (typeof item.str === "string") {
+                  return item.str;
+                }
+                return "";
+              })
+              .join(" ")
+          );
 
-      pages.push({ page: pageNumber, text: pageText });
+          const pageNumber =
+            typeof pageData.pageNumber === "number"
+              ? pageData.pageNumber
+              : pages.length + 1;
 
-      return pageText;
-    },
-  });
+          pages.push({ page: pageNumber, text: pageText });
+
+          return pageText;
+        } catch (pageError) {
+          console.warn("Error processing page:", pageError);
+          pages.push({
+            page: pages.length + 1,
+            text: `[Error processing page: ${pageError}]`,
+          });
+          return "";
+        }
+      },
+    });
+  } catch (error) {
+    throw new Error(`Failed to parse PDF: ${error}`);
+  }
 
   return pages;
 }

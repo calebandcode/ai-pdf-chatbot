@@ -302,12 +302,14 @@ export async function saveDocument({
   kind,
   content,
   userId,
+  metadata,
 }: {
   id: string;
   title: string;
   kind: ArtifactKind;
   content: string;
   userId: string;
+  metadata?: Record<string, unknown> | null;
 }) {
   try {
     return await db
@@ -317,6 +319,7 @@ export async function saveDocument({
         title,
         kind,
         content,
+        metadata: metadata ?? null,
         userId,
         createdAt: new Date(),
       })
@@ -740,6 +743,47 @@ export async function saveQuizAnswers({
     throw new ChatSDKError(
       "bad_request:database",
       "Failed to save quiz answers"
+    );
+  }
+}
+
+export async function getQuizById({
+  id,
+  userId,
+}: {
+  id: string;
+  userId: string;
+}): Promise<Quiz | undefined> {
+  try {
+    const [quizRecord] = await db
+      .select()
+      .from(quizzes)
+      .where(and(eq(quizzes.id, id), eq(quizzes.userId, userId)))
+      .limit(1)
+      .execute();
+
+    return quizRecord;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to fetch quiz");
+  }
+}
+
+export async function getQuestionsByQuizId({
+  quizId,
+}: {
+  quizId: string;
+}): Promise<Question[]> {
+  try {
+    return await db
+      .select()
+      .from(questions)
+      .where(eq(questions.quizId, quizId))
+      .orderBy(asc(questions.id))
+      .execute();
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch quiz questions"
     );
   }
 }

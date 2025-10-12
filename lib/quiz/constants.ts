@@ -1,0 +1,2 @@
+export const QUIZ_DEFAULT_DURATION_SECONDS = 600;
+

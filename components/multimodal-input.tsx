@@ -191,10 +191,12 @@ function PureMultimodalInput({
           easy: {
             quizId: easyQuiz.quizId,
             count: easyQuiz.count,
+            title: easyQuiz.title,
           },
           hard: {
             quizId: hardQuiz.quizId,
             count: hardQuiz.count,
+            title: hardQuiz.title,
           },
         };
 
@@ -205,6 +207,7 @@ function PureMultimodalInput({
           {
             id: generateUUID(),
             role: "assistant",
+            name: "quiz-offer",
             metadata: { createdAt: now },
             parts: [
               {

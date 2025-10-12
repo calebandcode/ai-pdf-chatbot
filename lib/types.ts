@@ -44,6 +44,12 @@ export type CustomUIDataTypes = {
   finish: null;
   usage: AppUsage;
   quizOffer: QuizOfferPayload;
+  quizInitial: {
+    quizId: string;
+    title: string;
+    questions: QuizQuestion[];
+  };
+  quizResult: QuizResult;
 };
 
 export type ChatMessage = UIMessage<
@@ -64,9 +70,38 @@ export type QuizDifficulty = "easy" | "hard";
 export type QuizOfferSummary = {
   quizId: string;
   count: number;
+  title: string;
 };
 
 export type QuizOfferPayload = {
   easy: QuizOfferSummary;
   hard: QuizOfferSummary;
+};
+
+export type QuizOption = {
+  id: string;
+  label: string;
+  text: string;
+};
+
+export type QuizQuestion = {
+  id: string;
+  prompt: string;
+  difficulty: QuizDifficulty;
+  options: QuizOption[];
+  correct: string;
+  explanation: string;
+  sourceRefs: Array<{ documentId: string; page: number }>;
+};
+
+export type QuizResult = {
+  quizId: string;
+  score: number;
+  correctCount: number;
+  total: number;
+  answers: Array<{
+    questionId: string;
+    chosenOptionId: string | null;
+    isCorrect: boolean;
+  }>;
 };
