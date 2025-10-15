@@ -10,8 +10,8 @@ import {
   gte,
   inArray,
   lt,
-  sql,
   type SQL,
+  sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -22,17 +22,25 @@ import type { AppUsage } from "../usage";
 import { generateUUID } from "../utils";
 import {
   type Answer,
-  answers,
   type Attempt,
+  answers,
   attempts,
   type Chat,
+  type ChatQuiz,
   chat,
+  chatQuizzes,
   type DBMessage,
+  type DocumentChunk,
+  type DocumentSummary,
   docChunks,
   document,
+  documentSummaries,
   documents,
-  type DocumentChunk,
+  type Flashcard,
+  flashcards,
   type IngestedDocument,
+  type Lesson,
+  lessons,
   message,
   type NewAnswer,
   type NewAttempt,
@@ -41,8 +49,8 @@ import {
   type NewQuestion,
   type NewQuiz,
   type Question,
-  questions,
   type Quiz,
+  questions,
   quizzes,
   type Suggestion,
   stream,
@@ -331,13 +339,13 @@ export async function saveDocument({
 
 export async function getDocumentsById({ id }: { id: string }) {
   try {
-    const documents = await db
+    const docResults = await db
       .select()
       .from(document)
       .where(eq(document.id, id))
       .orderBy(asc(document.createdAt));
 
-    return documents;
+    return docResults;
   } catch (_error) {
     throw new ChatSDKError(
       "bad_request:database",
@@ -587,7 +595,10 @@ export async function createDocumentRecord({
   userId,
   title,
   blobUrl,
-}: Pick<NewDocument, "userId" | "title" | "blobUrl">): Promise<IngestedDocument> {
+}: Pick<
+  NewDocument,
+  "userId" | "title" | "blobUrl"
+>): Promise<IngestedDocument> {
   try {
     const [inserted] = await db
       .insert(documents)
@@ -630,7 +641,7 @@ export async function saveDocumentChunks({
   chunks,
 }: {
   documentId: string;
-  chunks: Array<Omit<NewDocumentChunk, "documentId">>;
+  chunks: Omit<NewDocumentChunk, "documentId">[];
 }): Promise<DocumentChunk[]> {
   if (chunks.length === 0) {
     return [];
@@ -687,7 +698,7 @@ export async function saveQuizQuestions({
   questions: quizQuestions,
 }: {
   quizId: string;
-  questions: Array<Omit<NewQuestion, "quizId">>;
+  questions: Omit<NewQuestion, "quizId">[];
 }): Promise<Question[]> {
   if (quizQuestions.length === 0) {
     return [];
@@ -714,7 +725,10 @@ export async function saveQuizQuestions({
 }
 
 export async function createQuizAttempt(
-  attempt: Pick<NewAttempt, "quizId" | "userId" | "startedAt" | "submittedAt" | "scorePct">
+  attempt: Pick<
+    NewAttempt,
+    "quizId" | "userId" | "startedAt" | "submittedAt" | "scorePct"
+  >
 ): Promise<Attempt> {
   try {
     const [inserted] = await db.insert(attempts).values(attempt).returning();
@@ -730,14 +744,17 @@ export async function createQuizAttempt(
 export async function saveQuizAnswers({
   answers: attemptAnswers,
 }: {
-  answers: Array<NewAnswer>;
+  answers: NewAnswer[];
 }): Promise<Answer[]> {
   if (attemptAnswers.length === 0) {
     return [];
   }
 
   try {
-    const inserted = await db.insert(answers).values(attemptAnswers).returning();
+    const inserted = await db
+      .insert(answers)
+      .values(attemptAnswers)
+      .returning();
     return inserted;
   } catch (_error) {
     throw new ChatSDKError(
@@ -784,6 +801,300 @@ export async function getQuestionsByQuizId({
     throw new ChatSDKError(
       "bad_request:database",
       "Failed to fetch quiz questions"
+    );
+  }
+}
+
+// Enhanced AI PDF Chatbot queries
+export async function createDocumentSummary({
+  documentId,
+  summary,
+  suggestedActions,
+}: {
+  documentId: string;
+  summary: string;
+  suggestedActions: string[];
+}): Promise<DocumentSummary> {
+  try {
+    const [result] = await db
+      .insert(documentSummaries)
+      .values({
+        documentId,
+        summary,
+        suggestedActions,
+      })
+      .returning();
+
+    if (!result) {
+      throw new Error("Failed to create document summary");
+    }
+
+    return result;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to create document summary"
+    );
+  }
+}
+
+export async function getDocumentSummary({
+  documentId,
+}: {
+  documentId: string;
+}): Promise<DocumentSummary | null> {
+  try {
+    const [result] = await db
+      .select()
+      .from(documentSummaries)
+      .where(eq(documentSummaries.documentId, documentId))
+      .orderBy(desc(documentSummaries.createdAt))
+      .limit(1)
+      .execute();
+
+    return result || null;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch document summary"
+    );
+  }
+}
+
+export async function createLesson({
+  documentId,
+  userId,
+  title,
+  summary,
+  keyTerms,
+  sourcePages,
+  content,
+}: {
+  documentId: string;
+  userId: string;
+  title: string;
+  summary: string;
+  keyTerms: string[];
+  sourcePages: number[];
+  content: string;
+}): Promise<Lesson> {
+  try {
+    const [result] = await db
+      .insert(lessons)
+      .values({
+        documentId,
+        userId,
+        title,
+        summary,
+        keyTerms,
+        sourcePages,
+        content,
+      })
+      .returning();
+
+    if (!result) {
+      throw new Error("Failed to create lesson");
+    }
+
+    return result;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to create lesson");
+  }
+}
+
+export async function getLessonsByDocumentId({
+  documentId,
+  userId,
+}: {
+  documentId: string;
+  userId: string;
+}): Promise<Lesson[]> {
+  try {
+    return await db
+      .select()
+      .from(lessons)
+      .where(
+        and(eq(lessons.documentId, documentId), eq(lessons.userId, userId))
+      )
+      .orderBy(asc(lessons.createdAt))
+      .execute();
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to fetch lessons");
+  }
+}
+
+export async function getLessonById({
+  id,
+  userId,
+}: {
+  id: string;
+  userId: string;
+}): Promise<Lesson | null> {
+  try {
+    const [result] = await db
+      .select()
+      .from(lessons)
+      .where(and(eq(lessons.id, id), eq(lessons.userId, userId)))
+      .limit(1)
+      .execute();
+
+    return result || null;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to fetch lesson");
+  }
+}
+
+export async function createFlashcards({
+  lessonId,
+  flashcards: flashcardData,
+}: {
+  lessonId: string;
+  flashcards: {
+    front: string;
+    back: string;
+    sourcePage: number;
+  }[];
+}): Promise<Flashcard[]> {
+  try {
+    const flashcardsToInsert = flashcardData.map((card) => ({
+      lessonId,
+      front: card.front,
+      back: card.back,
+      sourcePage: card.sourcePage,
+    }));
+
+    return await db.insert(flashcards).values(flashcardsToInsert).returning();
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to create flashcards"
+    );
+  }
+}
+
+export async function getFlashcardsByLessonId({
+  lessonId,
+}: {
+  lessonId: string;
+}): Promise<Flashcard[]> {
+  try {
+    return await db
+      .select()
+      .from(flashcards)
+      .where(eq(flashcards.lessonId, lessonId))
+      .orderBy(asc(flashcards.createdAt))
+      .execute();
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch flashcards"
+    );
+  }
+}
+
+export async function createChatQuiz({
+  chatId,
+  userId,
+  title,
+  questions: quizQuestions,
+}: {
+  chatId: string;
+  userId: string;
+  title: string;
+  questions: any[];
+}): Promise<ChatQuiz> {
+  try {
+    const [result] = await db
+      .insert(chatQuizzes)
+      .values({
+        chatId,
+        userId,
+        title,
+        questions: quizQuestions,
+      })
+      .returning();
+
+    if (!result) {
+      throw new Error("Failed to create chat quiz");
+    }
+
+    return result;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to create chat quiz"
+    );
+  }
+}
+
+export async function getChatQuizById({
+  id,
+  userId,
+}: {
+  id: string;
+  userId: string;
+}): Promise<ChatQuiz | null> {
+  try {
+    const [result] = await db
+      .select()
+      .from(chatQuizzes)
+      .where(and(eq(chatQuizzes.id, id), eq(chatQuizzes.userId, userId)))
+      .limit(1)
+      .execute();
+
+    return result || null;
+  } catch (_error) {
+    throw new ChatSDKError("bad_request:database", "Failed to fetch chat quiz");
+  }
+}
+
+export async function updateChatQuiz({
+  id,
+  userId,
+  updates,
+}: {
+  id: string;
+  userId: string;
+  updates: Partial<
+    Pick<ChatQuiz, "currentQuestionIndex" | "answers" | "isCompleted">
+  >;
+}): Promise<ChatQuiz> {
+  try {
+    const [result] = await db
+      .update(chatQuizzes)
+      .set(updates)
+      .where(and(eq(chatQuizzes.id, id), eq(chatQuizzes.userId, userId)))
+      .returning();
+
+    if (!result) {
+      throw new Error("Failed to update chat quiz");
+    }
+
+    return result;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update chat quiz"
+    );
+  }
+}
+
+export async function getDocumentChunks({
+  documentId,
+}: {
+  documentId: string;
+}): Promise<DocumentChunk[]> {
+  try {
+    return await db
+      .select()
+      .from(docChunks)
+      .where(eq(docChunks.documentId, documentId))
+      .orderBy(asc(docChunks.page))
+      .execute();
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch document chunks"
     );
   }
 }

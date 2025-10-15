@@ -273,3 +273,88 @@ export const answers = pgTable("answers", {
 
 export type Answer = InferSelectModel<typeof answers>;
 export type NewAnswer = InferInsertModel<typeof answers>;
+
+// Enhanced schema for AI PDF Chatbot
+export const lessons = pgTable("lessons", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  keyTerms: jsonb("key_terms").notNull().$type<string[]>(),
+  sourcePages: jsonb("source_pages").notNull().$type<number[]>(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type Lesson = InferSelectModel<typeof lessons>;
+export type NewLesson = InferInsertModel<typeof lessons>;
+
+export const flashcards = pgTable("flashcards", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  lessonId: uuid("lesson_id")
+    .notNull()
+    .references(() => lessons.id, { onDelete: "cascade" }),
+  front: text("front").notNull(),
+  back: text("back").notNull(),
+  sourcePage: integer("source_page").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type Flashcard = InferSelectModel<typeof flashcards>;
+export type NewFlashcard = InferInsertModel<typeof flashcards>;
+
+export const chatQuizzes = pgTable("chat_quizzes", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  chatId: uuid("chat_id")
+    .notNull()
+    .references(() => chat.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
+  title: text("title").notNull(),
+  questions: jsonb("questions").notNull().$type<ChatQuizQuestion[]>(),
+  currentQuestionIndex: integer("current_question_index").notNull().default(0),
+  answers: jsonb("answers")
+    .notNull()
+    .$type<Record<string, string>>()
+    .default({}),
+  isCompleted: boolean("is_completed").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type ChatQuiz = InferSelectModel<typeof chatQuizzes>;
+export type NewChatQuiz = InferInsertModel<typeof chatQuizzes>;
+
+export const documentSummaries = pgTable("document_summaries", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  summary: text("summary").notNull(),
+  suggestedActions: jsonb("suggested_actions").notNull().$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type DocumentSummary = InferSelectModel<typeof documentSummaries>;
+export type NewDocumentSummary = InferInsertModel<typeof documentSummaries>;
+
+// Type definitions for enhanced quiz system
+export type ChatQuizQuestion = {
+  id: string;
+  question: string;
+  type: "short_answer" | "multiple_choice";
+  options?: string[];
+  correctAnswer: string;
+  explanation: string;
+  sourcePage: number;
+  difficulty: "easy" | "medium" | "hard";
+};

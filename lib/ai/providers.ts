@@ -1,4 +1,4 @@
-import { gateway } from "@ai-sdk/gateway";
+import { google } from "@ai-sdk/google";
 import {
   customProvider,
   extractReasoningMiddleware,
@@ -25,12 +25,12 @@ export const myProvider = isTestEnvironment
     })()
   : customProvider({
       languageModels: {
-        "chat-model": gateway.languageModel("google/gemini-1.5-pro"),
+        "chat-model": google("gemini-2.5-flash"),
         "chat-model-reasoning": wrapLanguageModel({
-          model: gateway.languageModel("google/gemini-1.5-pro"),
+          model: google("gemini-2.5-flash"),
           middleware: extractReasoningMiddleware({ tagName: "think" }),
         }),
-        "title-model": gateway.languageModel("google/gemini-1.5-pro"),
-        "artifact-model": gateway.languageModel("google/gemini-1.5-pro"),
+        "title-model": google("gemini-2.5-flash"),
+        "artifact-model": google("gemini-2.5-flash"),
       },
     });
