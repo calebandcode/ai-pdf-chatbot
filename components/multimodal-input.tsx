@@ -130,8 +130,7 @@ function PureMultimodalInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
-  const [isProcessingAttachments, setIsProcessingAttachments] =
-    useState(false);
+  const [isProcessingAttachments, setIsProcessingAttachments] = useState(false);
 
   const submitForm = useCallback(async () => {
     if (isProcessingAttachments) {
