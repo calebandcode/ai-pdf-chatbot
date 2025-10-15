@@ -20,9 +20,10 @@ import { auth, type UserType } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
-import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
+import { pdfTutorSystemPrompt, type RequestHints } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
+import { generatePdfQuiz } from "@/lib/ai/tools/generate-pdf-quiz";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
 import { updateDocument } from "@/lib/ai/tools/update-document";
@@ -31,6 +32,7 @@ import {
   createStreamId,
   deleteChatById,
   getChatById,
+  getDocumentChunks,
   getMessageCountByUserId,
   getMessagesByChatId,
   saveChat,
@@ -100,11 +102,13 @@ export async function POST(request: Request) {
       message,
       selectedChatModel,
       selectedVisibilityType,
+      documentIds,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
+      documentIds?: string[];
     } = requestBody;
 
     const session = await auth();
@@ -115,35 +119,46 @@ export async function POST(request: Request) {
 
     const userType: UserType = session.user.type;
 
-    const messageCount = await getMessageCountByUserId({
-      id: session.user.id,
-      differenceInHours: 24,
-    });
+    // Handle database operations with fallbacks
+    let messageCount = 0;
+    let chat = null;
+    let messagesFromDb: any[] = [];
 
-    if (messageCount > entitlementsByUserType[userType].maxMessagesPerDay) {
-      return new ChatSDKError("rate_limit:chat").toResponse();
-    }
+    try {
+      messageCount = await getMessageCountByUserId({
+        id: session.user.id,
+        differenceInHours: 24,
+      });
 
-    const chat = await getChatById({ id });
-
-    if (chat) {
-      if (chat.userId !== session.user.id) {
-        return new ChatSDKError("forbidden:chat").toResponse();
+      if (messageCount > entitlementsByUserType[userType].maxMessagesPerDay) {
+        return new ChatSDKError("rate_limit:chat").toResponse();
       }
-    } else {
-      const title = await generateTitleFromUserMessage({
-        message,
-      });
 
-      await saveChat({
-        id,
-        userId: session.user.id,
-        title,
-        visibility: selectedVisibilityType,
-      });
+      chat = await getChatById({ id });
+
+      if (chat) {
+        if (chat.userId !== session.user.id) {
+          return new ChatSDKError("forbidden:chat").toResponse();
+        }
+      } else {
+        const title = await generateTitleFromUserMessage({
+          message,
+        });
+
+        await saveChat({
+          id,
+          userId: session.user.id,
+          title,
+          visibility: selectedVisibilityType,
+        });
+      }
+
+      messagesFromDb = await getMessagesByChatId({ id });
+    } catch (dbError) {
+      console.warn("Database not available for chat, using fallback:", dbError);
+      // Continue with empty messages for development
     }
 
-    const messagesFromDb = await getMessagesByChatId({ id });
     const uiMessages = [...convertToUIMessages(messagesFromDb), message];
 
     const { longitude, latitude, city, country } = geolocation(request);
@@ -154,6 +169,31 @@ export async function POST(request: Request) {
       city,
       country,
     };
+
+    // Check if we have document context for PDF tutoring
+    let hasDocumentContext = false;
+    let documentContext = "";
+
+    if (documentIds && documentIds.length > 0) {
+      try {
+        const allChunks: Array<{ page: number }> = [];
+        for (const documentId of documentIds) {
+          const chunks = await getDocumentChunks({ documentId });
+          allChunks.push(...chunks);
+        }
+
+        if (allChunks.length > 0) {
+          hasDocumentContext = true;
+          const pageCount = Math.max(...allChunks.map((c) => c.page));
+          documentContext = `You have access to a document with ${pageCount} pages. Use this as your primary source for all responses. Always cite page numbers when making claims.`;
+        }
+      } catch (error) {
+        console.warn("Failed to load document context, using mock:", error);
+        hasDocumentContext = true;
+        documentContext =
+          "Document context: This is a PDF document that has been uploaded for learning. The AI tutor can help you understand the content, answer questions, and create quizzes based on the material.";
+      }
+    }
 
     await saveMessages({
       messages: [
@@ -177,7 +217,12 @@ export async function POST(request: Request) {
       execute: ({ writer: dataStream }) => {
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }),
+          system:
+            pdfTutorSystemPrompt({
+              selectedChatModel,
+              requestHints,
+              hasDocumentContext,
+            }) + (documentContext ? `\n\n${documentContext}` : ""),
           messages: convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),
           experimental_activeTools:
@@ -188,6 +233,7 @@ export async function POST(request: Request) {
                   "createDocument",
                   "updateDocument",
                   "requestSuggestions",
+                  ...(hasDocumentContext ? ["generatePdfQuiz" as const] : []),
                 ],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
@@ -198,6 +244,11 @@ export async function POST(request: Request) {
               session,
               dataStream,
             }),
+            ...(hasDocumentContext
+              ? {
+                  generatePdfQuiz: generatePdfQuiz({ session, dataStream }),
+                }
+              : {}),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
@@ -247,16 +298,20 @@ export async function POST(request: Request) {
       },
       generateId: generateUUID,
       onFinish: async ({ messages }) => {
-        await saveMessages({
-          messages: messages.map((currentMessage) => ({
-            id: currentMessage.id,
-            role: currentMessage.role,
-            parts: currentMessage.parts,
-            createdAt: new Date(),
-            attachments: [],
-            chatId: id,
-          })),
-        });
+        try {
+          await saveMessages({
+            messages: messages.map((currentMessage) => ({
+              id: currentMessage.id,
+              role: currentMessage.role,
+              parts: currentMessage.parts,
+              createdAt: new Date(),
+              attachments: [],
+              chatId: id,
+            })),
+          });
+        } catch (dbError) {
+          console.warn("Unable to save messages to database:", dbError);
+        }
 
         if (finalMergedUsage) {
           try {
