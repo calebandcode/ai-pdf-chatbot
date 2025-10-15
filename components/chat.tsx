@@ -41,6 +41,7 @@ export function Chat({
   isReadonly,
   autoResume,
   initialLastContext,
+  documentIds,
 }: {
   id: string;
   initialMessages: ChatMessage[];
@@ -49,6 +50,7 @@ export function Chat({
   isReadonly: boolean;
   autoResume: boolean;
   initialLastContext?: AppUsage;
+  documentIds?: string[];
 }) {
   const { visibilityType } = useChatVisibility({
     chatId: id,
@@ -91,6 +93,7 @@ export function Chat({
             message: request.messages.at(-1),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
+            documentIds,
             ...request.body,
           },
         };

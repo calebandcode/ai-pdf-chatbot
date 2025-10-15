@@ -130,15 +130,14 @@ function PureMultimodalInput({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
-  const [isProcessingAttachments, setIsProcessingAttachments] =
-    useState(false);
+  const [isProcessingAttachments, setIsProcessingAttachments] = useState(false);
 
   const submitForm = useCallback(async () => {
     if (isProcessingAttachments) {
       return;
     }
 
-    window.history.replaceState({}, "", `/chat/${chatId}`);
+    window.history.replaceState({}, "", "/chat");
 
     const trimmedInput = input.trim();
 
@@ -180,6 +179,16 @@ function PureMultimodalInput({
           throw new Error("No documents returned from ingestion");
         }
 
+        // For PDF tutor: redirect to chat with document context
+        const firstDoc = documents[0];
+        if (firstDoc?.documentId && firstDoc?.summary) {
+          // Redirect to chat with document context
+          const chatUrl = `/chat?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
+          window.location.href = chatUrl;
+          return;
+        }
+
+        // Fallback: generate quiz offers for non-PDF documents
         const documentIds = documents.map((doc) => doc.documentId);
 
         const [easyQuiz, hardQuiz] = await Promise.all([
@@ -270,7 +279,6 @@ function PureMultimodalInput({
     attachments,
     chatId,
     isProcessingAttachments,
-    generateQuiz,
     input,
     resetHeight,
     sendMessage,
@@ -278,7 +286,6 @@ function PureMultimodalInput({
     setInput,
     setLocalStorageInput,
     setMessages,
-    uploadAndIngest,
     width,
   ]);
 
@@ -325,26 +332,103 @@ function PureMultimodalInput({
     async (event: ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(event.target.files || []);
 
-      setUploadQueue(files.map((file) => file.name));
+      // Check if any files are PDFs - if so, process them directly for ingestion
+      const pdfFiles = files.filter((file) => file.type === "application/pdf");
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
 
-      try {
-        const uploadPromises = files.map((file) => uploadFile(file));
-        const uploadedAttachments = await Promise.all(uploadPromises);
-        const successfullyUploadedAttachments = uploadedAttachments.filter(
-          (attachment) => attachment !== undefined
-        );
+      if (pdfFiles.length > 0) {
+        setUploadQueue(pdfFiles.map((file) => file.name));
+        setIsProcessingAttachments(true);
 
-        setAttachments((currentAttachments) => [
-          ...currentAttachments,
-          ...successfullyUploadedAttachments,
-        ]);
-      } catch (error) {
-        console.error("Error uploading files!", error);
-      } finally {
-        setUploadQueue([]);
+        try {
+          const formData = new FormData();
+          pdfFiles.forEach((file) => {
+            formData.append("files", file, file.name);
+          });
+
+          const { documents } = await uploadAndIngest(formData);
+
+          if (!documents || documents.length === 0) {
+            throw new Error("No documents returned from ingestion");
+          }
+
+          // For PDF tutor: redirect to chat with document context
+          const firstDoc = documents[0];
+          if (firstDoc?.documentId && firstDoc?.summary) {
+            // Redirect to chat with document context
+            const chatUrl = `/chat?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
+            window.location.href = chatUrl;
+            return;
+          }
+
+          toast.success("PDF processed successfully!");
+        } catch (error) {
+          console.error("Failed to process PDF", error);
+          toast.error("Failed to process PDF. Please try again.");
+        } finally {
+          setUploadQueue([]);
+          setIsProcessingAttachments(false);
+        }
+        return;
+      }
+
+      // Handle image files with the existing uploadFile logic
+      if (imageFiles.length > 0) {
+        setUploadQueue(imageFiles.map((file) => file.name));
+
+        try {
+          const uploadPromises = imageFiles.map((file) => uploadFile(file));
+          const uploadedAttachments = await Promise.all(uploadPromises);
+          const successfullyUploadedAttachments = uploadedAttachments.filter(
+            (attachment) => attachment !== undefined
+          );
+
+          setAttachments((currentAttachments) => [
+            ...currentAttachments,
+            ...successfullyUploadedAttachments,
+          ]);
+        } catch (error) {
+          console.error("Error uploading files!", error);
+        } finally {
+          setUploadQueue([]);
+        }
       }
     },
     [setAttachments, uploadFile]
+  );
+
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) {
+        setUploadQueue(files.map((file) => file.name));
+
+        // Simulate file input change
+        const event = {
+          target: { files },
+        } as ChangeEvent<HTMLInputElement>;
+        handleFileChange(event);
+      }
+    },
+    [handleFileChange]
   );
 
   return (
@@ -359,7 +443,21 @@ function PureMultimodalInput({
           />
         )}
 
+      {isDragOver && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-blue-500 border-dashed bg-blue-50/80 dark:bg-blue-950/80">
+          <div className="text-center">
+            <p className="font-medium text-blue-700 dark:text-blue-300">
+              Drop PDF files here
+            </p>
+            <p className="text-blue-600 text-sm dark:text-blue-400">
+              The AI tutor will read and start a chat
+            </p>
+          </div>
+        </div>
+      )}
+
       <input
+        accept=".pdf"
         className="-top-4 -left-4 pointer-events-none fixed size-0.5 opacity-0"
         multiple
         onChange={handleFileChange}
@@ -370,6 +468,9 @@ function PureMultimodalInput({
 
       <PromptInput
         className="rounded-xl border border-border bg-background p-3 shadow-xs transition-all duration-200 focus-within:border-border hover:border-muted-foreground/50"
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         onSubmit={async (event) => {
           event.preventDefault();
           if (status !== "ready" && !isProcessingAttachments) {
@@ -421,7 +522,7 @@ function PureMultimodalInput({
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder="Send a message..."
+            placeholder="Send a message or drag & drop a PDF to start learning..."
             ref={textareaRef}
             rows={1}
             value={input}
