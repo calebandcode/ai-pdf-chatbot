@@ -65,6 +65,7 @@ function PureMultimodalInput({
   selectedModelId,
   onModelChange,
   usage,
+  onDocumentUploaded,
 }: {
   chatId: string;
   input: string;
@@ -81,6 +82,7 @@ function PureMultimodalInput({
   selectedModelId: string;
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
+  onDocumentUploaded?: () => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
@@ -137,7 +139,7 @@ function PureMultimodalInput({
       return;
     }
 
-    window.history.replaceState({}, "", "/chat");
+    window.history.replaceState({}, "", "/");
 
     const trimmedInput = input.trim();
 
@@ -179,13 +181,39 @@ function PureMultimodalInput({
           throw new Error("No documents returned from ingestion");
         }
 
-        // For PDF tutor: redirect to chat with document context
-        const firstDoc = documents[0];
-        if (firstDoc?.documentId && firstDoc?.summary) {
-          // Redirect to chat with document context
-          const chatUrl = `/chat?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
-          window.location.href = chatUrl;
-          return;
+        // Check if we're in an existing chat or starting fresh
+        const isNewChat = messages.length === 0;
+
+        if (isNewChat) {
+          // For new chats: redirect to chat with document context
+          const firstDoc = documents[0];
+          if (firstDoc?.documentId && firstDoc?.summary) {
+            const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
+            window.location.href = chatUrl;
+            return;
+          }
+        } else {
+          // For existing chats: send a message with the document context
+          const firstDoc = documents[0];
+          if (firstDoc?.documentId && firstDoc?.summary) {
+            // Send a message indicating the document was uploaded
+            const documentMessage = {
+              id: generateUUID(),
+              role: "assistant" as const,
+              parts: [
+                {
+                  type: "text" as const,
+                  text: `📄 I've processed your PDF: "${firstDoc.title}". ${firstDoc.summary} You can now ask questions about this document.`,
+                },
+              ],
+              createdAt: new Date(),
+            };
+
+            setMessages((currentMessages) => [
+              ...currentMessages,
+              documentMessage,
+            ]);
+          }
         }
 
         // Fallback: generate quiz offers for non-PDF documents
@@ -342,9 +370,9 @@ function PureMultimodalInput({
 
         try {
           const formData = new FormData();
-          pdfFiles.forEach((file) => {
+          for (const file of pdfFiles) {
             formData.append("files", file, file.name);
-          });
+          }
 
           const { documents } = await uploadAndIngest(formData);
 
@@ -352,13 +380,52 @@ function PureMultimodalInput({
             throw new Error("No documents returned from ingestion");
           }
 
-          // For PDF tutor: redirect to chat with document context
-          const firstDoc = documents[0];
-          if (firstDoc?.documentId && firstDoc?.summary) {
-            // Redirect to chat with document context
-            const chatUrl = `/chat?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
-            window.location.href = chatUrl;
-            return;
+          // Check if we're in an existing chat or starting fresh
+          const isNewChat = messages.length === 0;
+
+          if (isNewChat) {
+            // For new chats: redirect to chat with document context
+            const firstDoc = documents[0];
+            if (firstDoc?.documentId && firstDoc?.summary) {
+              const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
+              window.location.href = chatUrl;
+              return;
+            }
+          } else {
+            // For existing chats: send a message with the document context
+            const firstDoc = documents[0];
+            if (firstDoc?.documentId && firstDoc?.summary) {
+              // Send a message indicating the document was uploaded
+              const documentMessage = {
+                id: generateUUID(),
+                role: "assistant" as const,
+                parts: [
+                  {
+                    type: "text" as const,
+                    text: `📄 I've processed your PDF: "${firstDoc.title}". ${firstDoc.summary} You can now ask questions about this document.`,
+                  },
+                ],
+                createdAt: new Date(),
+              };
+
+              setMessages((currentMessages) => [
+                ...currentMessages,
+                documentMessage,
+              ]);
+
+              // Store documentIds in sessionStorage for this chat
+              const currentDocIds = JSON.parse(
+                sessionStorage.getItem(`chat-${chatId}-docIds`) || "[]"
+              );
+              const newDocIds = [...currentDocIds, firstDoc.documentId];
+              sessionStorage.setItem(
+                `chat-${chatId}-docIds`,
+                JSON.stringify(newDocIds)
+              );
+
+              // Notify parent component to refresh documentIds
+              onDocumentUploaded?.();
+            }
           }
 
           toast.success("PDF processed successfully!");
@@ -394,7 +461,14 @@ function PureMultimodalInput({
         }
       }
     },
-    [setAttachments, uploadFile]
+    [
+      setAttachments,
+      uploadFile,
+      messages.length,
+      chatId,
+      onDocumentUploaded,
+      setMessages,
+    ]
   );
 
   const [isDragOver, setIsDragOver] = useState(false);
@@ -424,7 +498,7 @@ function PureMultimodalInput({
         // Simulate file input change
         const event = {
           target: { files },
-        } as ChangeEvent<HTMLInputElement>;
+        } as unknown as ChangeEvent<HTMLInputElement>;
         handleFileChange(event);
       }
     },

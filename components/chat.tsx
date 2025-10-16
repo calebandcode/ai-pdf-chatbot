@@ -66,9 +66,38 @@ export function Chat({
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
+  // Get documentIds from sessionStorage for this chat
+  const [sessionDocIds, setSessionDocIds] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return JSON.parse(sessionStorage.getItem(`chat-${id}-docIds`) || "[]");
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  // Combine initial documentIds with sessionStorage documentIds
+  const allDocumentIds = [...(documentIds || []), ...sessionDocIds];
+
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
+
+  // Function to refresh documentIds from sessionStorage
+  const refreshDocumentIds = () => {
+    if (typeof window !== "undefined") {
+      try {
+        const newDocIds = JSON.parse(
+          sessionStorage.getItem(`chat-${id}-docIds`) || "[]"
+        );
+        setSessionDocIds(newDocIds);
+      } catch {
+        setSessionDocIds([]);
+      }
+    }
+  };
 
   const {
     messages,
@@ -93,7 +122,7 @@ export function Chat({
             message: request.messages.at(-1),
             selectedChatModel: currentModelIdRef.current,
             selectedVisibilityType: visibilityType,
-            documentIds,
+            documentIds: allDocumentIds,
             ...request.body,
           },
         };
@@ -185,6 +214,7 @@ export function Chat({
               chatId={id}
               input={input}
               messages={messages}
+              onDocumentUploaded={refreshDocumentIds}
               onModelChange={setCurrentModelId}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}

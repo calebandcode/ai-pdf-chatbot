@@ -40,6 +40,7 @@ import {
   updateChatLastContextById,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
+import { retrieveTopK } from "@/lib/retrieval";
 import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
 
     // Handle database operations with fallbacks
     let messageCount = 0;
-    let chat = null;
+    let chat: any = null;
     let messagesFromDb: any[] = [];
 
     try {
@@ -176,16 +177,29 @@ export async function POST(request: Request) {
 
     if (documentIds && documentIds.length > 0) {
       try {
-        const allChunks: Array<{ page: number }> = [];
-        for (const documentId of documentIds) {
-          const chunks = await getDocumentChunks({ documentId });
-          allChunks.push(...chunks);
-        }
+        // Retrieve relevant chunks based on the user's message
+        const userMessageText = message.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join(" ");
 
-        if (allChunks.length > 0) {
+        const relevantChunks = await retrieveTopK({
+          userId: session.user.id,
+          docIds: documentIds,
+          query: userMessageText,
+          k: 10, // Get top 10 most relevant chunks
+        });
+
+        if (relevantChunks.length > 0) {
           hasDocumentContext = true;
-          const pageCount = Math.max(...allChunks.map((c) => c.page));
-          documentContext = `You have access to a document with ${pageCount} pages. Use this as your primary source for all responses. Always cite page numbers when making claims.`;
+          const pageCount = Math.max(...relevantChunks.map((c) => c.page));
+
+          // Build context from relevant chunks
+          const contextText = relevantChunks
+            .map((chunk) => `Page ${chunk.page}: ${chunk.content}`)
+            .join("\n\n");
+
+          documentContext = `You have access to a document with ${pageCount} pages. Here are the most relevant sections for the user's question:\n\n${contextText}\n\nUse this as your primary source for all responses. Always cite page numbers when making claims.`;
         }
       } catch (error) {
         console.warn("Failed to load document context, using mock:", error);
@@ -195,21 +209,29 @@ export async function POST(request: Request) {
       }
     }
 
-    await saveMessages({
-      messages: [
-        {
-          chatId: id,
-          id: message.id,
-          role: "user",
-          parts: message.parts,
-          attachments: [],
-          createdAt: new Date(),
-        },
-      ],
-    });
+    try {
+      await saveMessages({
+        messages: [
+          {
+            chatId: id,
+            id: message.id,
+            role: "user",
+            parts: message.parts,
+            attachments: [],
+            createdAt: new Date(),
+          },
+        ],
+      });
+    } catch (dbError) {
+      console.warn("Unable to save user message to database:", dbError);
+    }
 
     const streamId = generateUUID();
-    await createStreamId({ streamId, chatId: id });
+    try {
+      await createStreamId({ streamId, chatId: id });
+    } catch (dbError) {
+      console.warn("Unable to create stream ID:", dbError);
+    }
 
     let finalMergedUsage: AppUsage | undefined;
 

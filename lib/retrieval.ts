@@ -25,15 +25,17 @@ export type RetrievedChunk = {
 };
 
 /**
- * TODO: Support vector search by computing a query embedding and ordering by cosine similarity.
+ * Retrieve relevant chunks using vector similarity search
  */
 export async function retrieveTopK({
   userId,
   docIds,
+  query,
   k = 40,
 }: {
   userId: string;
   docIds: string[];
+  query?: string;
   k?: number;
 }): Promise<RetrievedChunk[]> {
   if (!userId) {
@@ -41,32 +43,74 @@ export async function retrieveTopK({
   }
 
   const targetDocIds = docIds?.filter(Boolean) ?? [];
-
   const limit = Math.max(k ?? 40, 30);
 
-  const conditions = [eq(documents.userId, userId)] as Array<
-    ReturnType<typeof eq>
-  >;
+  try {
+    const conditions = [eq(documents.userId, userId)] as Array<
+      ReturnType<typeof eq>
+    >;
 
-  if (targetDocIds.length > 0) {
-    conditions.push(inArray(documents.id, targetDocIds));
+    if (targetDocIds.length > 0) {
+      conditions.push(inArray(documents.id, targetDocIds));
+    }
+
+    let rows: RetrievedChunk[] = [];
+
+    // If we have a query, try vector similarity search
+    if (query && query.trim()) {
+      try {
+        // Import embedding function dynamically to avoid circular deps
+        const { embedChunks } = await import("@/lib/ingest/embed");
+        const queryChunks = await embedChunks([{ content: query.trim() }]);
+
+        if (queryChunks.length > 0 && queryChunks[0].embedding) {
+          const queryEmbedding = queryChunks[0].embedding;
+
+          // Vector similarity search using cosine distance
+          rows = await db
+            .select({
+              documentId: docChunks.documentId,
+              page: docChunks.page,
+              content: docChunks.content,
+            })
+            .from(docChunks)
+            .innerJoin(documents, eq(documents.id, docChunks.documentId))
+            .where(and(...conditions))
+            .orderBy(
+              sql<number>`1 - (${docChunks.embedding} <=> ${JSON.stringify(queryEmbedding)}) DESC`
+            )
+            .limit(limit);
+        }
+      } catch (vectorError) {
+        console.warn(
+          "Vector search failed, falling back to text search:",
+          vectorError
+        );
+      }
+    }
+
+    // Fallback to text-based search if vector search failed or no query
+    if (rows.length === 0) {
+      rows = await db
+        .select({
+          documentId: docChunks.documentId,
+          page: docChunks.page,
+          content: docChunks.content,
+        })
+        .from(docChunks)
+        .innerJoin(documents, eq(documents.id, docChunks.documentId))
+        .where(and(...conditions))
+        .orderBy(
+          desc(sql<number>`char_length(${docChunks.content})`),
+          docChunks.documentId,
+          docChunks.page
+        )
+        .limit(limit);
+    }
+
+    return rows;
+  } catch (error) {
+    console.warn("Database retrieval failed, returning empty results:", error);
+    return [];
   }
-
-  const rows = await db
-    .select({
-      documentId: docChunks.documentId,
-      page: docChunks.page,
-      content: docChunks.content,
-    })
-    .from(docChunks)
-    .innerJoin(documents, eq(documents.id, docChunks.documentId))
-    .where(and(...conditions))
-    .orderBy(
-      desc(sql<number>`char_length(${docChunks.content})`),
-      docChunks.documentId,
-      docChunks.page
-    )
-    .limit(limit);
-
-  return rows;
 }

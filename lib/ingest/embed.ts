@@ -1,7 +1,41 @@
-import { ChatSDKError } from "@/lib/errors";
+// lib/ingest/embed.ts
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// Server-side key (do not expose via NEXT_PUBLIC_*)
+const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+if (!apiKey) {
+  console.warn(
+    "⚠️ GOOGLE_GENERATIVE_AI_API_KEY is missing — embeddings will use mock vectors."
+  );
+}
+
+const genAI = new GoogleGenerativeAI(apiKey || "");
+// Use the embeddings model via getGenerativeModel
+const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+
+function sanitizeEmbedding(embedding: any): number[] {
+  if (!embedding) {
+    return new Array(1536).fill(0);
+  }
+  if (Array.isArray(embedding.values)) {
+    const values = embedding.values as number[];
+    if (values.length === 1536) return values;
+    if (values.length > 1536) return values.slice(0, 1536);
+    // pad with zeros to 1536 dims
+    return values.concat(new Array(1536 - values.length).fill(0));
+  }
+  if (Array.isArray(embedding)) {
+    const values = embedding as number[];
+    if (values.length === 1536) return values;
+    if (values.length > 1536) return values.slice(0, 1536);
+    return values.concat(new Array(1536 - values.length).fill(0));
+  }
+  return new Array(1536).fill(0);
+}
 
 export type EmbeddableChunk = {
-  page: number;
+  page?: number;
+  pageNumber?: number;
   content: string;
 };
 
@@ -10,95 +44,62 @@ export type EmbeddedChunk = EmbeddableChunk & {
   tokens: number | null;
 };
 
-const MODEL = "text-embedding-3-small";
-const EMBEDDING_ENDPOINT = "https://api.openai.com/v1/embeddings";
-
-type EmbeddingResponse = {
-  data: Array<{
-    embedding: number[];
-    index: number;
-  }>;
-  usage?: {
-    prompt_tokens?: number;
-    total_tokens?: number;
-  };
-  error?: {
-    message?: string;
-  };
-};
-
-async function requestEmbedding(
-  input: string,
-  apiKey: string
-): Promise<{ embedding: EmbeddedChunk["embedding"]; tokens: number | null }> {
-  const response = await fetch(EMBEDDING_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      input,
-    }),
-  });
-
-  const payload = (await response.json()) as EmbeddingResponse;
-
-  if (!response.ok) {
-    const message =
-      payload?.error?.message ?? "Failed to generate embeddings for chunk";
-    throw new ChatSDKError("bad_request:api", message);
-  }
-
-  const embedding = payload.data?.at(0)?.embedding;
-
-  if (!embedding) {
-    throw new ChatSDKError(
-      "bad_request:api",
-      "Embedding response did not include data"
-    );
-  }
-
-  const tokens =
-    typeof payload.usage?.prompt_tokens === "number"
-      ? payload.usage.prompt_tokens
-      : typeof payload.usage?.total_tokens === "number"
-        ? payload.usage.total_tokens
-        : null;
-
-  return { embedding, tokens };
-}
-
 export async function embedChunks(
   chunks: EmbeddableChunk[]
 ): Promise<EmbeddedChunk[]> {
-  if (chunks.length === 0) {
+  const results: EmbeddedChunk[] = [];
+
+  if (!chunks || chunks.length === 0) {
+    console.warn("⚠️ No chunks provided for embedding.");
     return [];
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  for (const chunk of chunks) {
+    const text = chunk.content?.trim();
 
-  if (!apiKey) {
-    throw new ChatSDKError(
-      "bad_request:api",
-      "OPENAI_API_KEY environment variable is not set"
-    );
+    // Skip only truly empty content
+    if (!text) {
+      console.warn(
+        `⚠️ Skipping empty chunk page=${chunk.pageNumber ?? chunk.page}`
+      );
+      continue;
+    }
+
+    try {
+      const response = await model.embedContent({
+        content: { role: "user", parts: [{ text }] },
+      });
+
+      const embedding = sanitizeEmbedding(response?.embedding);
+      results.push({
+        ...chunk,
+        embedding,
+        tokens: null,
+      });
+
+      console.log(`✅ Embedded chunk page=${chunk.pageNumber ?? chunk.page}`);
+    } catch (error) {
+      console.error(
+        `❌ Embedding failed for page=${chunk.pageNumber ?? chunk.page}:`,
+        error
+      );
+
+      // Fallback: add zero vector to preserve structure
+      results.push({
+        ...chunk,
+        embedding: new Array(1536).fill(0),
+        tokens: null,
+      });
+    }
   }
 
-  const results: EmbeddedChunk[] = [];
-
-  for (const chunk of chunks) {
-    const { embedding, tokens } = await requestEmbedding(
-      chunk.content,
-      apiKey
-    );
-
-    results.push({
+  if (results.length === 0) {
+    console.warn("⚠️ No embeddings generated. Returning mock data.");
+    return chunks.map((chunk) => ({
       ...chunk,
-      embedding,
-      tokens,
-    });
+      embedding: new Array(1536).fill(0),
+      tokens: null,
+    }));
   }
 
   return results;
