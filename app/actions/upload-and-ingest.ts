@@ -2,12 +2,15 @@
 
 import { put } from "@vercel/blob";
 import { auth } from "@/app/(auth)/auth";
+import { generateTitleFromUserMessage } from "@/app/(chat)/actions";
 import { generateDocumentSummary } from "@/lib/ai/pdf-tutor";
 import {
   createDocumentRecord,
   createDocumentSummary,
   getDocumentChunks,
+  saveChat,
   saveDocumentChunks,
+  saveMessages,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 import { chunkPages } from "@/lib/ingest/chunk";
@@ -24,6 +27,7 @@ type UploadResult = {
   summary?: string;
   suggestedActions?: string[];
   pageCount?: number;
+  chatId?: string;
 };
 
 const PDF_EXTENSION_REGEX = /\.pdf$/i;
@@ -101,7 +105,7 @@ export async function uploadAndIngest(formData: FormData) {
       await saveDocumentChunks({
         documentId: documentRecord.id,
         chunks: embedded.map((chunk) => ({
-          page: chunk.page,
+          page: chunk.page ?? 1,
           content: chunk.content,
           embedding: chunk.embedding,
           tokens: chunk.tokens ?? null,
@@ -124,6 +128,63 @@ export async function uploadAndIngest(formData: FormData) {
         suggestedActions: summaryResult.suggestedActions,
       });
 
+      // Create a chat entry for this PDF upload
+      const chatId = generateUUID();
+      const initialMessage = {
+        id: generateUUID(),
+        role: "user" as const,
+        parts: [
+          {
+            type: "text" as const,
+            text: `PDF uploaded: ${documentRecord.title}`,
+          },
+        ],
+        createdAt: new Date(),
+      };
+
+      // Generate a title for the chat based on the PDF
+      const chatTitle = await generateTitleFromUserMessage({
+        message: initialMessage,
+      });
+
+      // Save the chat to database
+      await saveChat({
+        id: chatId,
+        userId: session.user.id,
+        title: chatTitle,
+        visibility: "private",
+      });
+
+      // Create and save the initial AI message with summary and suggestions
+      const aiMessageId = generateUUID();
+      const initialAiMessage = {
+        id: aiMessageId,
+        chatId,
+        role: "assistant" as const,
+        parts: [
+          {
+            type: "text" as const,
+            text: `I've read "${documentRecord.title}" (${summaryResult.pageCount} pages). ${summaryResult.summary}
+
+Here are some things I can help you with:
+${summaryResult.suggestedActions.map(action => `• ${action}`).join('\n')}
+
+What would you like to do first?`,
+          },
+        ],
+        attachments: [],
+        createdAt: new Date(),
+      };
+
+      // Save the initial AI message to the database
+      try {
+        await saveMessages({
+          messages: [initialAiMessage],
+        });
+      } catch (dbError) {
+        console.warn("Unable to save initial AI message to database:", dbError);
+      }
+
       results.push({
         documentId: documentRecord.id,
         title: documentRecord.title,
@@ -132,6 +193,7 @@ export async function uploadAndIngest(formData: FormData) {
         summary: summaryResult.summary,
         suggestedActions: summaryResult.suggestedActions,
         pageCount: summaryResult.pageCount,
+        chatId,
       });
     } catch (dbError) {
       console.warn("Database not configured, using mock data:", dbError);
@@ -150,6 +212,9 @@ export async function uploadAndIngest(formData: FormData) {
         // Use mock data if PDF parsing also fails
       }
 
+      // Create a mock chat entry for development without database
+      const mockChatId = generateUUID();
+
       results.push({
         documentId: mockDocumentId,
         title,
@@ -163,6 +228,7 @@ export async function uploadAndIngest(formData: FormData) {
           "Ask specific questions",
         ],
         pageCount,
+        chatId: mockChatId,
       });
     }
   }

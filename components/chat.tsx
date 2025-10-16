@@ -171,6 +171,42 @@ export function Chat({
     }
   }, [query, sendMessage, hasAppendedQuery, id]);
 
+  // On mount, if there is a pending PDF upload message for this docId, send a dummy user message
+  useEffect(() => {
+    if (!documentIds || documentIds.length === 0) {
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const pending = JSON.parse(
+        sessionStorage.getItem("pendingPdfMessage") || "null"
+      );
+      if (pending && documentIds.includes(pending.docId)) {
+        // Fire a user message to create chat entry
+        sendMessage({
+          role: "user",
+          parts: [
+            {
+              type: "text",
+              text: `PDF uploaded: ${pending.title || "Document"}`,
+            },
+          ],
+        });
+        toast.success(
+          `Sent PDF marker message: PDF uploaded: ${pending.title}`
+        );
+        console.log("Sent PDF marker message for new chat:", pending);
+        sessionStorage.removeItem("pendingPdfMessage");
+      }
+    } catch {
+      // Silently ignore parsing/storage errors
+    }
+    // Only on initial render for the sessionStorage effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentIds, sendMessage]);
+
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
     fetcher

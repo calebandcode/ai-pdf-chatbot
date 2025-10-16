@@ -25,6 +25,7 @@ interface UploadResult {
   summary?: string;
   suggestedActions?: string[];
   pageCount?: number;
+  chatId?: string;
 }
 
 export function PDFTutorUpload() {
@@ -69,8 +70,10 @@ export function PDFTutorUpload() {
           const firstDoc = result.documents[0];
           if (firstDoc.documentId) {
             setTimeout(() => {
+              // Use the chat ID if available, otherwise fall back to the old method
+              const chatParam = firstDoc.chatId ? `/${firstDoc.chatId}` : "";
               router.push(
-                `/chat?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary || "")}`
+                `/chat${chatParam}?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary || "")}`
               );
             }, 1000);
           }

@@ -3,13 +3,15 @@ import { redirect } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
-import { getDocumentSummary } from "@/lib/db/queries";
+import { getDocumentSummary, getMessagesByChatId } from "@/lib/db/queries";
 import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
 export default async function Page({
+  params,
   searchParams,
 }: {
+  params: Promise<{ id?: string }>;
   searchParams: Promise<{ doc?: string; summary?: string }>;
 }) {
   const session = await auth();
@@ -18,52 +20,76 @@ export default async function Page({
     redirect("/api/auth/guest");
   }
 
-  const params = await searchParams;
-  const documentId = params.doc;
-  const summaryText = params.summary;
+  const { id: chatId } = await params;
+  const searchParamsData = await searchParams;
+  const documentId = searchParamsData.doc;
+  const summaryText = searchParamsData.summary;
 
-  const id = generateUUID();
+  // Use provided chat ID or generate a new one
+  const id = chatId || generateUUID();
 
   // If a document is provided, we'll handle PDF context in the chat
   if (documentId) {
     try {
-      // Pre-load document context for the chat
-      let documentSummary = null;
-      try {
-        documentSummary = await getDocumentSummary({ documentId });
-      } catch (dbError) {
-        console.warn("Database not available, using mock summary:", dbError);
-        // Use mock summary when database is not available
-        documentSummary = {
-          summary:
-            summaryText ||
-            `I've read your document and I'm ready to help you learn!`,
-          suggestedActions: [
-            "Show lesson summaries",
-            "Generate practice questions",
-            "Create flashcards",
-            "Ask specific questions",
-          ],
-        };
+      // Load existing messages from database if chatId is provided
+      let existingMessages: any[] = [];
+      if (chatId) {
+        try {
+          existingMessages = await getMessagesByChatId({ id: chatId });
+        } catch (dbError) {
+          console.warn("Database not available for loading messages:", dbError);
+        }
       }
 
-      // Create initial message with document context if we have a summary
-      const initialMessages =
-        summaryText || documentSummary?.summary
-          ? [
-              {
-                id: generateUUID(),
-                role: "assistant" as const,
-                parts: [
-                  {
-                    type: "text" as const,
-                    text: `I've read your document and I'm ready to help you learn! ${summaryText || documentSummary?.summary || ""}`,
-                  },
-                ],
-                createdAt: new Date(),
-              },
-            ]
-          : [];
+      // If we have existing messages, use them; otherwise create initial message
+      let initialMessages: any[] = [];
+
+      if (existingMessages.length > 0) {
+        // Use existing messages from database
+        initialMessages = existingMessages.map((msg) => ({
+          id: msg.id,
+          role: msg.role,
+          parts: msg.parts,
+          createdAt: msg.createdAt,
+        }));
+      } else {
+        // Create initial message for new PDF chats
+        let documentSummary: { summary: string; suggestedActions: string[] } | null = null;
+        try {
+          documentSummary = await getDocumentSummary({ documentId });
+        } catch (dbError) {
+          console.warn("Database not available, using mock summary:", dbError);
+          // Use mock summary when database is not available
+          documentSummary = {
+            summary:
+              summaryText ||
+              `I've read your document and I'm ready to help you learn!`,
+            suggestedActions: [
+              "Show lesson summaries",
+              "Generate practice questions",
+              "Create flashcards",
+              "Ask specific questions",
+            ],
+          };
+        }
+
+        // Create initial message with document context if we have a summary
+        if (summaryText || documentSummary?.summary) {
+          initialMessages = [
+            {
+              id: generateUUID(),
+              role: "assistant" as const,
+              parts: [
+                {
+                  type: "text" as const,
+                  text: `I've read your document and I'm ready to help you learn! ${summaryText || documentSummary?.summary || ""}`,
+                },
+              ],
+              createdAt: new Date(),
+            },
+          ];
+        }
+      }
 
       const cookieStore = await cookies();
       const modelIdFromCookie = cookieStore.get("chat-model");

@@ -188,6 +188,14 @@ function PureMultimodalInput({
           // For new chats: redirect to chat with document context
           const firstDoc = documents[0];
           if (firstDoc?.documentId && firstDoc?.summary) {
+            // Store PDF upload intent for next page
+            sessionStorage.setItem(
+              "pendingPdfMessage",
+              JSON.stringify({
+                docId: firstDoc.documentId,
+                title: firstDoc.title || undefined,
+              })
+            );
             const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
             window.location.href = chatUrl;
             return;
@@ -385,14 +393,6 @@ function PureMultimodalInput({
 
           if (isNewChat) {
             // For new chats: redirect to chat with document context
-            const firstDoc = documents[0];
-            if (firstDoc?.documentId && firstDoc?.summary) {
-              const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
-              window.location.href = chatUrl;
-              return;
-            }
-          } else {
-            // For existing chats: send a message with the document context
             const firstDoc = documents[0];
             if (firstDoc?.documentId && firstDoc?.summary) {
               // Send a message indicating the document was uploaded
