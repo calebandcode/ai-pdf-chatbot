@@ -10,6 +10,7 @@ import {
   createChatQuiz,
   getChatQuizById,
   getDocumentChunks,
+  saveMessages,
   updateChatQuiz,
 } from "@/lib/db/queries";
 import type { ChatQuizQuestion } from "@/lib/db/schema";
@@ -32,7 +33,7 @@ export async function startChatQuiz({
 
   try {
     // Get chunks from all documents
-    const allChunks = [];
+    const allChunks: Awaited<ReturnType<typeof getDocumentChunks>> = [] as any;
     for (const documentId of documentIds) {
       const chunks = await getDocumentChunks({ documentId });
       allChunks.push(...chunks);
@@ -55,9 +56,32 @@ export async function startChatQuiz({
       questions,
     });
 
+    // Post the first question as an assistant message so it appears inline
+    const firstQuestion = questions[0] || null;
+    if (firstQuestion) {
+      await saveMessages({
+        messages: [
+          {
+            id: crypto.randomUUID(),
+            chatId,
+            role: "assistant",
+            parts: [
+              {
+                type: "text",
+                text: `Quiz Drill • Q1 (page ${firstQuestion.sourcePage}): ${firstQuestion.question}`,
+              },
+            ],
+            attachments: [],
+            createdAt: new Date(),
+            // mark as quiz drill context using metadata if schema allows; omitted if not supported
+          },
+        ],
+      });
+    }
+
     return {
       chatQuiz,
-      firstQuestion: questions[0] || null,
+      firstQuestion,
     };
   } catch (error) {
     if (error instanceof ChatSDKError) {
@@ -104,7 +128,7 @@ export async function submitChatQuizAnswer({
     }
 
     // Get document chunks for context
-    const allChunks = [];
+    const allChunks: Awaited<ReturnType<typeof getDocumentChunks>> = [] as any;
     for (const documentId of documentIds) {
       const chunks = await getDocumentChunks({ documentId });
       allChunks.push(...chunks);
@@ -117,8 +141,8 @@ export async function submitChatQuizAnswer({
     });
 
     // Update quiz with the answer
-    const updatedAnswers = {
-      ...chatQuiz.answers,
+    const updatedAnswers: Record<string, string | null> = {
+      ...(chatQuiz.answers as Record<string, string | null>),
       [questionId]: answer,
     };
 
