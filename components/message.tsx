@@ -20,6 +20,7 @@ import {
 } from "./elements/tool";
 import { SparklesIcon } from "./icons";
 import { QuizOfferMessage } from "./messages/QuizOfferMessage";
+import { PDFUploadMessage } from "./messages/pdf-upload-message";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
@@ -123,6 +124,16 @@ const PurePreviewMessage = ({
 
             if (type === "data-quizOffer") {
               return <QuizOfferMessage {...part.data} key={key} />;
+            }
+
+            if (type === "data-pdfUpload") {
+              return (
+                <PDFUploadMessage
+                  data={part.data}
+                  key={key}
+                  className="w-full max-w-4xl"
+                />
+              );
             }
 
             if (type === "text") {

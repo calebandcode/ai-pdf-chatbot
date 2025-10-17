@@ -67,7 +67,7 @@ export function Chat({
   const currentModelIdRef = useRef(currentModelId);
 
   // Get documentIds from sessionStorage for this chat
-  const [sessionDocIds, setSessionDocIds] = useState<string[]>(() => {
+  const sessionDocIds = (() => {
     if (typeof window !== "undefined") {
       try {
         return JSON.parse(sessionStorage.getItem(`chat-${id}-docIds`) || "[]");
@@ -76,7 +76,7 @@ export function Chat({
       }
     }
     return [];
-  });
+  })();
 
   // Combine initial documentIds with sessionStorage documentIds
   const allDocumentIds = [...(documentIds || []), ...sessionDocIds];
@@ -84,20 +84,6 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
-
-  // Function to refresh documentIds from sessionStorage
-  const refreshDocumentIds = () => {
-    if (typeof window !== "undefined") {
-      try {
-        const newDocIds = JSON.parse(
-          sessionStorage.getItem(`chat-${id}-docIds`) || "[]"
-        );
-        setSessionDocIds(newDocIds);
-      } catch {
-        setSessionDocIds([]);
-      }
-    }
-  };
 
   const {
     messages,
@@ -194,18 +180,38 @@ export function Chat({
             },
           ],
         });
-        toast.success(
-          `Sent PDF marker message: PDF uploaded: ${pending.title}`
-        );
+        toast({
+          type: "success",
+          description: `PDF uploaded: ${pending.title}`,
+        });
         console.log("Sent PDF marker message for new chat:", pending);
         sessionStorage.removeItem("pendingPdfMessage");
       }
-    } catch {
-      // Silently ignore parsing/storage errors
+    } catch (error) {
+      console.warn("Error handling pending PDF message:", error);
     }
     // Only on initial render for the sessionStorage effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentIds, sendMessage]);
+
+  // Debug: Log messages and document IDs for PDF chats
+  useEffect(() => {
+    if (documentIds && documentIds.length > 0) {
+      console.log("📱 Chat component - Document IDs:", documentIds);
+      console.log("📱 Chat component - Messages count:", messages.length);
+      console.log("📱 Chat component - Chat ID:", id);
+      messages.forEach((msg, index) => {
+        console.log(`📱 Message ${index + 1}:`, {
+          id: msg.id,
+          role: msg.role,
+          partsCount: msg.parts?.length || 0,
+          hasPdfUpload: msg.parts?.some(
+            (part: any) => part.type === "data-pdfUpload"
+          ),
+        });
+      });
+    }
+  }, [documentIds, messages, id]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
@@ -250,7 +256,6 @@ export function Chat({
               chatId={id}
               input={input}
               messages={messages}
-              onDocumentUploaded={refreshDocumentIds}
               onModelChange={setCurrentModelId}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}

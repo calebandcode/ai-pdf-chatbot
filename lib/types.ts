@@ -50,6 +50,14 @@ export type CustomUIDataTypes = {
     questions: QuizQuestion[];
   };
   quizResult: QuizResult;
+  pdfUpload: {
+    documentTitle: string;
+    pageCount: number;
+    summary: string;
+    suggestedActions: string[];
+    documentId: string;
+    chatId: string;
+  };
 };
 
 export type ChatMessage = UIMessage<

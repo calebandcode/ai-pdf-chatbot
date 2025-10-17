@@ -36,8 +36,22 @@ export default async function Page({
       if (chatId) {
         try {
           existingMessages = await getMessagesByChatId({ id: chatId });
+          console.log(
+            `📨 Loaded ${existingMessages.length} existing messages for chat ${chatId}`
+          );
+          existingMessages.forEach((msg, index) => {
+            console.log(`📨 Message ${index + 1}:`, {
+              id: msg.id,
+              role: msg.role,
+              partsCount: msg.parts?.length || 0,
+              hasPdfUpload: msg.parts?.some(
+                (part: any) => part.type === "data-pdfUpload"
+              ),
+            });
+          });
         } catch (dbError) {
-          console.warn("Database not available for loading messages:", dbError);
+          console.error("❌ Database not available for loading messages:", dbError);
+          throw new Error(`Failed to load chat messages: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
         }
       }
 
@@ -52,9 +66,15 @@ export default async function Page({
           parts: msg.parts,
           createdAt: msg.createdAt,
         }));
+        console.log(
+          `📨 Using ${initialMessages.length} existing messages for chat display`
+        );
       } else {
         // Create initial message for new PDF chats
-        let documentSummary: { summary: string; suggestedActions: string[] } | null = null;
+        let documentSummary: {
+          summary: string;
+          suggestedActions: string[];
+        } | null = null;
         try {
           documentSummary = await getDocumentSummary({ documentId });
         } catch (dbError) {

@@ -220,13 +220,11 @@ export async function getChatsByUserId({
       hasMore,
     };
   } catch (error) {
-    console.warn("Database not configured, using mock data:", error);
-
-    // Return mock data for development without database
-    return {
-      chats: [],
-      hasMore: false,
-    };
+    console.error("❌ Database query failed for getChatsByUserId:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      `Failed to get chats: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -239,8 +237,8 @@ export async function getChatById({ id }: { id: string }) {
 
     return selectedChat;
   } catch (error) {
-    console.warn("Database not configured, using mock data:", error);
-    return null;
+    console.error("❌ Database query failed for getChatById:", error);
+    throw new ChatSDKError("bad_request:database", `Failed to get chat: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -248,8 +246,8 @@ export async function saveMessages({ messages }: { messages: DBMessage[] }) {
   try {
     return await db.insert(message).values(messages);
   } catch (error) {
-    console.warn("Database not configured, skipping message save:", error);
-    return [];
+    console.error("❌ Database operation failed for saveMessages:", error);
+    throw new ChatSDKError("bad_request:database", `Failed to save messages: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -261,8 +259,8 @@ export async function getMessagesByChatId({ id }: { id: string }) {
       .where(eq(message.chatId, id))
       .orderBy(asc(message.createdAt));
   } catch (error) {
-    console.warn("Database not configured, using mock data:", error);
-    return [];
+    console.error("❌ Database query failed for getMessagesByChatId:", error);
+    throw new ChatSDKError("bad_request:database", `Failed to get messages: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

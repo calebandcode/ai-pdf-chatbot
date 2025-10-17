@@ -40,6 +40,19 @@ function isFile(value: unknown): value is File {
   return typeof File !== "undefined" && value instanceof File;
 }
 
+function formatDurationMs(durationMs: number): string {
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  const seconds = durationMs / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = Math.floor(seconds % 60);
+  return `${minutes}m ${remSeconds}s`;
+}
+
 export async function uploadAndIngest(formData: FormData) {
   const session = await auth();
 
@@ -56,6 +69,7 @@ export async function uploadAndIngest(formData: FormData) {
   const results: UploadResult[] = [];
 
   for (const file of files) {
+    const startedAtMs = Date.now();
     if (file.type !== "application/pdf") {
       throw new ChatSDKError(
         "bad_request:api",
@@ -88,9 +102,6 @@ export async function uploadAndIngest(formData: FormData) {
 
     const title = sanitizeTitle(file.name);
 
-    // For development without database, create a mock document record
-    const mockDocumentId = generateUUID();
-
     try {
       const documentRecord = await createDocumentRecord({
         userId: session.user.id,
@@ -98,9 +109,22 @@ export async function uploadAndIngest(formData: FormData) {
         blobUrl,
       });
 
+      console.log("📄 Starting PDF processing for:", title);
       const pages = await extractPdfPages(buffer);
+      console.log("📄 Extracted pages:", pages.length, "pages");
+
+      // Log first page content to verify PDF parsing is working
+      if (pages.length > 0) {
+        console.log(
+          `📄 First page content preview: ${pages[0].text.slice(0, 200)}...`
+        );
+      }
+
       const chunks = chunkPages(pages);
+      console.log("📄 Created chunks:", chunks.length, "chunks");
+
       const embedded = await embedChunks(chunks);
+      console.log("📄 Generated embeddings for chunks");
 
       await saveDocumentChunks({
         documentId: documentRecord.id,
@@ -116,10 +140,24 @@ export async function uploadAndIngest(formData: FormData) {
       const documentChunks = await getDocumentChunks({
         documentId: documentRecord.id,
       });
+      console.log(
+        "📄 Retrieved document chunks for AI processing:",
+        documentChunks.length
+      );
+
+      // Log sample content being sent to AI
+      if (documentChunks.length > 0) {
+        console.log(
+          `📄 Sample content for AI: ${documentChunks[0].content.slice(0, 200)}...`
+        );
+      }
+
       const summaryResult = await generateDocumentSummary({
         chunks: documentChunks,
         title: documentRecord.title,
       });
+      console.log("📄 Generated summary:", summaryResult.summary);
+      const elapsedMs = Date.now() - startedAtMs;
 
       // Save the summary to database
       await createDocumentSummary({
@@ -155,7 +193,7 @@ export async function uploadAndIngest(formData: FormData) {
         visibility: "private",
       });
 
-      // Create and save the initial AI message with summary and suggestions
+      // Create and save the initial AI message with interactive PDF upload data
       const aiMessageId = generateUUID();
       const initialAiMessage = {
         id: aiMessageId,
@@ -164,25 +202,46 @@ export async function uploadAndIngest(formData: FormData) {
         parts: [
           {
             type: "text" as const,
-            text: `I've read "${documentRecord.title}" (${summaryResult.pageCount} pages). ${summaryResult.summary}
-
-Here are some things I can help you with:
-${summaryResult.suggestedActions.map(action => `• ${action}`).join('\n')}
-
-What would you like to do first?`,
+            text: `Done • analyzed ${summaryResult.pageCount} pages in ${formatDurationMs(elapsedMs)}`,
+          },
+          {
+            type: "data-pdfUpload" as const,
+            data: {
+              documentTitle: documentRecord.title,
+              pageCount: summaryResult.pageCount,
+              summary: summaryResult.summary,
+              suggestedActions: summaryResult.suggestedActions,
+              documentId: documentRecord.id,
+              chatId,
+            },
           },
         ],
         attachments: [],
         createdAt: new Date(),
       };
 
+      console.log("🤖 Creating initial AI message:", {
+        id: aiMessageId,
+        chatId,
+        documentTitle: documentRecord.title,
+        summaryLength: summaryResult.summary.length,
+        suggestedActionsCount: summaryResult.suggestedActions.length,
+      });
+
       // Save the initial AI message to the database
       try {
         await saveMessages({
           messages: [initialAiMessage],
         });
+        console.log("✅ Initial AI message saved to database successfully");
       } catch (dbError) {
-        console.warn("Unable to save initial AI message to database:", dbError);
+        console.error(
+          "❌ Failed to save initial AI message to database:",
+          dbError
+        );
+        throw new Error(
+          `Database save failed: ${dbError instanceof Error ? dbError.message : String(dbError)}`
+        );
       }
 
       results.push({
@@ -196,40 +255,13 @@ What would you like to do first?`,
         chatId,
       });
     } catch (dbError) {
-      console.warn("Database not configured, using mock data:", dbError);
-
-      // Mock data for development without database
-      let pageCount = 1;
-      let chunksCount = 1;
-
-      try {
-        const pages = await extractPdfPages(buffer);
-        pageCount = pages.length;
-        const chunks = chunkPages(pages);
-        chunksCount = chunks.length;
-      } catch (pdfError) {
-        console.warn("PDF parsing failed, using mock data:", pdfError);
-        // Use mock data if PDF parsing also fails
-      }
-
-      // Create a mock chat entry for development without database
-      const mockChatId = generateUUID();
-
-      results.push({
-        documentId: mockDocumentId,
-        title,
-        blobUrl,
-        chunksInserted: chunksCount,
-        summary: `I've read "${title}" (${pageCount} pages). This document covers important topics that I can help you explore.`,
-        suggestedActions: [
-          "Show lesson summaries",
-          "Generate practice questions",
-          "Create flashcards",
-          "Ask specific questions",
-        ],
-        pageCount,
-        chatId: mockChatId,
-      });
+      console.error(
+        "❌ Database operations failed during PDF upload:",
+        dbError
+      );
+      throw new Error(
+        `PDF upload failed: ${dbError instanceof Error ? dbError.message : String(dbError)}`
+      );
     }
   }
 

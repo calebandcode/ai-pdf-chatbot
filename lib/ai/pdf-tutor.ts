@@ -1,4 +1,5 @@
-import { generateText } from "ai";
+import { generateObject, generateText } from "ai";
+import { z } from "zod";
 import type { ChatQuizQuestion, DocumentChunk } from "@/lib/db/schema";
 import { myProvider } from "./providers";
 
@@ -43,50 +44,49 @@ export async function generateDocumentSummary({
   const content = chunks
     .map((chunk) => `Page ${chunk.page}: ${chunk.content}`)
     .join("\n\n");
-
-  const { text } = await generateText({
-    model: myProvider.languageModel("chat-model"),
-    system: `You are an AI tutor. Generate a concise summary and suggested actions for a PDF document.
-
-Requirements:
-- Summary should be 1-2 sentences highlighting the main topic
-- Suggested actions should be 4 specific options the user can take
-- Always mention the page count
-- Be encouraging and helpful
-
-Format your response as JSON:
-{
-  "summary": "Brief summary of the document",
-  "suggestedActions": ["Action 1", "Action 2", "Action 3", "Action 4"]
-}`,
-    prompt: `Document: "${title}" (${pageCount} pages)
-
-Content preview:
-${content.slice(0, 2000)}...
-
-Generate a summary and suggested actions for this document.`,
+  // Use structured output to avoid JSON parsing failures and generic fallbacks
+  const SummarySchema = z.object({
+    summary: z
+      .string()
+      .min(40)
+      .describe(
+        "2-3 sentences, teacher-like, include the main topic and why it matters for exams, and mention total pages."
+      ),
+    suggestedActions: z
+      .array(z.string().min(5))
+      .min(3)
+      .max(6)
+      .describe(
+        "Concrete learning activities like 'Generate 10 practice questions on X', 'Create flashcards for key terms', 'Explain concept Y with examples', etc."
+      ),
   });
 
-  try {
-    const parsed = JSON.parse(text);
-    return {
-      summary: parsed.summary,
-      suggestedActions: parsed.suggestedActions,
-      pageCount,
-    };
-  } catch (_error) {
-    // Fallback if JSON parsing fails
-    return {
-      summary: `I've read "${title}" (${pageCount} pages). This document covers important topics that I can help you explore.`,
-      suggestedActions: [
-        "Show lesson summaries",
-        "Generate practice questions",
-        "Create flashcards",
-        "Ask specific questions",
-      ],
-      pageCount,
-    };
-  }
+  const { object } = await generateObject({
+    model: myProvider.languageModel("chat-model"),
+    schema: SummarySchema,
+    system:
+      "You are an experienced AI tutor. Write warm, encouraging, exam-focused guidance. Prefer specific actions over generic ones.",
+    prompt: `Analyze this document and produce a concise study-oriented summary and concrete actions.
+
+Document title: "${title}"
+Total pages: ${pageCount}
+
+Content preview (truncate as needed, do not repeat verbatim):
+${content.slice(0, 6000)}
+
+Requirements:
+- The summary must sound like a teacher introducing the topic to a student preparing for an exam.
+- Mention the total page count explicitly.
+- Avoid generic phrasing like "important topics". Name the main concepts when possible.
+- Suggested actions must be click-worthy, actionable options a student can take right now.
+`,
+  });
+
+  return {
+    summary: object.summary,
+    suggestedActions: object.suggestedActions,
+    pageCount,
+  };
 }
 
 /**
