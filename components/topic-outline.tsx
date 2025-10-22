@@ -43,10 +43,10 @@ export function TopicOutline({
   const toggleTopic = async (topicName: string) => {
     const newExpanded = new Set(expandedTopics);
     const isExpanding = !newExpanded.has(topicName);
-
+    
     if (isExpanding) {
       newExpanded.add(topicName);
-      // Auto-generate explanation if not already loaded
+      // Only auto-generate explanation if not already loaded
       if (!topicContent[topicName]) {
         await generateTopicExplanation(topicName);
       }
@@ -59,10 +59,10 @@ export function TopicOutline({
   const toggleSubtopic = async (subtopicName: string) => {
     const newExpanded = new Set(expandedTopics);
     const isExpanding = !newExpanded.has(`subtopic-${subtopicName}`);
-
+    
     if (isExpanding) {
       newExpanded.add(`subtopic-${subtopicName}`);
-      // Auto-generate explanation if not already loaded
+      // Only auto-generate explanation if not already loaded
       if (!subtopicContent[subtopicName]) {
         await generateSubtopicExplanation(subtopicName);
       }
@@ -73,6 +73,11 @@ export function TopicOutline({
   };
 
   const generateTopicExplanation = async (topicName: string) => {
+    // Check if content already exists to prevent unnecessary API calls
+    if (topicContent[topicName]) {
+      return;
+    }
+
     const key = `explain-${topicName}`;
     setLoadingStates((prev) => new Set(prev).add(key));
 
@@ -110,6 +115,11 @@ export function TopicOutline({
   };
 
   const generateSubtopicExplanation = async (subtopicName: string) => {
+    // Check if content already exists to prevent unnecessary API calls
+    if (subtopicContent[subtopicName]) {
+      return;
+    }
+
     const key = `explain-${subtopicName}`;
     setLoadingStates((prev) => new Set(prev).add(key));
 
@@ -212,7 +222,6 @@ export function TopicOutline({
         chatId,
         documentIds,
         title: `Quiz: ${subtopic}`,
-        pages, // Focus on specific pages for this subtopic
       });
 
       // Trigger message refresh
