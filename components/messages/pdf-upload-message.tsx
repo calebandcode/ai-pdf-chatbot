@@ -7,13 +7,23 @@ import {
   type PDFSuggestionAction,
   PDFSuggestions,
 } from "@/components/pdf-suggestions";
+import { TopicOutline } from "@/components/topic-outline";
 import { usePDFActions } from "@/hooks/use-pdf-actions";
 import { cn } from "@/lib/utils";
 
-interface PDFUploadMessageData {
+type PDFUploadMessageData = {
   documentTitle: string;
   pageCount: number;
   summary: string;
+  mainTopics?: Array<{
+    topic: string;
+    description: string;
+    pages: number[];
+    subtopics?: Array<{
+      subtopic: string;
+      pages: number[];
+    }>;
+  }>;
   documentId: string;
   chatId: string;
   onAction?: (
@@ -21,16 +31,23 @@ interface PDFUploadMessageData {
     documentId: string,
     chatId: string
   ) => void;
-}
+};
 
-interface PDFUploadMessageProps {
+type PDFUploadMessageProps = {
   data: PDFUploadMessageData;
   className?: string;
-}
+};
 
 export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
-  const { documentTitle, pageCount, summary, documentId, chatId, onAction } =
-    data;
+  const {
+    documentTitle,
+    pageCount,
+    summary,
+    mainTopics,
+    documentId,
+    chatId,
+    onAction,
+  } = data;
   const { handlePDFAction } = usePDFActions();
 
   console.log("🎨 Rendering PDF Upload Message:", {
@@ -93,6 +110,17 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         </h4>
         <p className="text-sm leading-relaxed">{summary}</p>
       </div>
+
+      {/* Topic Outline */}
+      {mainTopics && mainTopics.length > 0 && (
+        <div className="mt-4">
+          <TopicOutline
+            chatId={chatId}
+            documentIds={[documentId]}
+            topics={mainTopics}
+          />
+        </div>
+      )}
 
       {/* Interactive suggestions */}
       <div>

@@ -238,7 +238,10 @@ export async function getChatById({ id }: { id: string }) {
     return selectedChat;
   } catch (error) {
     console.error("❌ Database query failed for getChatById:", error);
-    throw new ChatSDKError("bad_request:database", `Failed to get chat: ${error instanceof Error ? error.message : String(error)}`);
+    throw new ChatSDKError(
+      "bad_request:database",
+      `Failed to get chat: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -247,7 +250,10 @@ export async function saveMessages({ messages }: { messages: DBMessage[] }) {
     return await db.insert(message).values(messages);
   } catch (error) {
     console.error("❌ Database operation failed for saveMessages:", error);
-    throw new ChatSDKError("bad_request:database", `Failed to save messages: ${error instanceof Error ? error.message : String(error)}`);
+    throw new ChatSDKError(
+      "bad_request:database",
+      `Failed to save messages: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -260,7 +266,10 @@ export async function getMessagesByChatId({ id }: { id: string }) {
       .orderBy(asc(message.createdAt));
   } catch (error) {
     console.error("❌ Database query failed for getMessagesByChatId:", error);
-    throw new ChatSDKError("bad_request:database", `Failed to get messages: ${error instanceof Error ? error.message : String(error)}`);
+    throw new ChatSDKError(
+      "bad_request:database",
+      `Failed to get messages: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -826,10 +835,20 @@ export async function getQuestionsByQuizId({
 export async function createDocumentSummary({
   documentId,
   summary,
+  mainTopics,
   suggestedActions,
 }: {
   documentId: string;
   summary: string;
+  mainTopics?: Array<{
+    topic: string;
+    description: string;
+    pages: number[];
+    subtopics?: Array<{
+      subtopic: string;
+      pages: number[];
+    }>;
+  }>;
   suggestedActions: string[];
 }): Promise<DocumentSummary> {
   try {
@@ -838,6 +857,7 @@ export async function createDocumentSummary({
       .values({
         documentId,
         summary,
+        mainTopics,
         suggestedActions,
       })
       .returning();
@@ -855,6 +875,7 @@ export async function createDocumentSummary({
       id: generateUUID(),
       documentId,
       summary,
+      mainTopics: mainTopics || null,
       suggestedActions,
       createdAt: new Date(),
     };
@@ -884,6 +905,7 @@ export async function getDocumentSummary({
       id: generateUUID(),
       documentId,
       summary: `I've read the document (${documentId.slice(0, 8)}...). This document covers important topics that I can help you explore.`,
+      mainTopics: null,
       suggestedActions: [
         "Show lesson summaries",
         "Generate practice questions",

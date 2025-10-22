@@ -122,6 +122,10 @@ export function Chat({
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
+      // Also refresh messages to ensure we have the latest from database
+      window.dispatchEvent(
+        new CustomEvent("refresh-messages", { detail: { chatId: id } })
+      );
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
@@ -194,24 +198,30 @@ export function Chat({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentIds, sendMessage]);
 
-  // Debug: Log messages and document IDs for PDF chats
+  // Listen for message refresh events from server actions
   useEffect(() => {
-    if (documentIds && documentIds.length > 0) {
-      console.log("📱 Chat component - Document IDs:", documentIds);
-      console.log("📱 Chat component - Messages count:", messages.length);
-      console.log("📱 Chat component - Chat ID:", id);
-      messages.forEach((msg, index) => {
-        console.log(`📱 Message ${index + 1}:`, {
-          id: msg.id,
-          role: msg.role,
-          partsCount: msg.parts?.length || 0,
-          hasPdfUpload: msg.parts?.some(
-            (part: any) => part.type === "data-pdfUpload"
-          ),
-        });
-      });
-    }
-  }, [documentIds, messages, id]);
+    const handleRefreshMessages = async (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { chatId: eventChatId } = customEvent.detail;
+      if (eventChatId === id) {
+        try {
+          // Fetch latest messages from server
+          const response = await fetch(`/api/chat/${id}/messages`);
+          if (response.ok) {
+            const latestMessages = await response.json();
+            setMessages(latestMessages);
+          }
+        } catch (error) {
+          console.warn("Failed to refresh messages:", error);
+        }
+      }
+    };
+
+    window.addEventListener("refresh-messages", handleRefreshMessages);
+    return () => {
+      window.removeEventListener("refresh-messages", handleRefreshMessages);
+    };
+  }, [id, setMessages]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,

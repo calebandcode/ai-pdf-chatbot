@@ -175,7 +175,10 @@ function PureMultimodalInput({
           })
         );
 
+        console.time("uploadAndIngest(submitForm)");
         const { documents } = await uploadAndIngest(formData);
+        console.timeEnd("uploadAndIngest(submitForm)");
+        console.log("submitForm: uploadAndIngest returned", documents);
 
         if (!documents || documents.length === 0) {
           throw new Error("No documents returned from ingestion");
@@ -197,6 +200,7 @@ function PureMultimodalInput({
               })
             );
             const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
+            console.log("submitForm: redirecting to", chatUrl);
             window.location.href = chatUrl;
             return;
           }
@@ -204,6 +208,10 @@ function PureMultimodalInput({
           // For existing chats: send a message with the document context
           const firstDoc = documents[0];
           if (firstDoc?.documentId && firstDoc?.summary) {
+            console.log(
+              "submitForm: existing chat, appending assistant message",
+              { chatId, documentId: firstDoc.documentId }
+            );
             // Send a message indicating the document was uploaded
             const documentMessage = {
               id: generateUUID(),
@@ -366,6 +374,19 @@ function PureMultimodalInput({
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
+      // Guard against duplicate invocations
+      if (isProcessingAttachments) {
+        console.warn(
+          "handleFileChange: upload already in progress, ignoring new selection"
+        );
+        return;
+      }
+      if (sessionStorage.getItem("uploadInProgress") === "1") {
+        console.warn(
+          "handleFileChange: session uploadInProgress flag set, ignoring"
+        );
+        return;
+      }
       const files = Array.from(event.target.files || []);
 
       // Check if any files are PDFs - if so, process them directly for ingestion
@@ -375,6 +396,7 @@ function PureMultimodalInput({
       if (pdfFiles.length > 0) {
         setUploadQueue(pdfFiles.map((file) => file.name));
         setIsProcessingAttachments(true);
+        sessionStorage.setItem("uploadInProgress", "1");
 
         try {
           const formData = new FormData();
@@ -392,39 +414,22 @@ function PureMultimodalInput({
           const isNewChat = messages.length === 0;
 
           if (isNewChat) {
-            // For new chats: redirect to chat with document context
+            // For new chats: redirect to main chat route with document params
             const firstDoc = documents[0];
             if (firstDoc?.documentId && firstDoc?.summary) {
-              // Send a message indicating the document was uploaded
-              const documentMessage = {
-                id: generateUUID(),
-                role: "assistant" as const,
-                parts: [
-                  {
-                    type: "text" as const,
-                    text: `📄 I've processed your PDF: "${firstDoc.title}". ${firstDoc.summary} You can now ask questions about this document.`,
-                  },
-                ],
-                createdAt: new Date(),
-              };
-
-              setMessages((currentMessages) => [
-                ...currentMessages,
-                documentMessage,
-              ]);
-
-              // Store documentIds in sessionStorage for this chat
-              const currentDocIds = JSON.parse(
-                sessionStorage.getItem(`chat-${chatId}-docIds`) || "[]"
-              );
-              const newDocIds = [...currentDocIds, firstDoc.documentId];
+              // Persist intent for initial server-rendered message
               sessionStorage.setItem(
-                `chat-${chatId}-docIds`,
-                JSON.stringify(newDocIds)
+                "pendingPdfMessage",
+                JSON.stringify({
+                  docId: firstDoc.documentId,
+                  title: firstDoc.title || undefined,
+                })
               );
-
-              // Notify parent component to refresh documentIds
-              onDocumentUploaded?.();
+              const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(
+                firstDoc.summary
+              )}`;
+              window.location.href = chatUrl;
+              return;
             }
           }
 
@@ -435,6 +440,7 @@ function PureMultimodalInput({
         } finally {
           setUploadQueue([]);
           setIsProcessingAttachments(false);
+          sessionStorage.removeItem("uploadInProgress");
         }
         return;
       }
@@ -465,7 +471,6 @@ function PureMultimodalInput({
       setAttachments,
       uploadFile,
       messages.length,
-      chatId,
       onDocumentUploaded,
       setMessages,
     ]

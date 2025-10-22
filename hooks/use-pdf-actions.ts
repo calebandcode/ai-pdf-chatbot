@@ -24,6 +24,11 @@ export function usePDFActions() {
             title: "Interactive Quiz Drill",
           });
           toast.success("Starting quiz drill! Check the chat for questions.");
+
+          // Refresh messages to show the quiz question
+          window.dispatchEvent(
+            new CustomEvent("refresh-messages", { detail: { chatId } })
+          );
           break;
 
         case "generate_quiz":

@@ -321,7 +321,7 @@ export const chatQuizzes = pgTable("chat_quizzes", {
   currentQuestionIndex: integer("current_question_index").notNull().default(0),
   answers: jsonb("answers")
     .notNull()
-    .$type<Record<string, string>>()
+    .$type<Record<string, string | null>>()
     .default({}),
   isCompleted: boolean("is_completed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -338,6 +338,18 @@ export const documentSummaries = pgTable("document_summaries", {
     .notNull()
     .references(() => documents.id, { onDelete: "cascade" }),
   summary: text("summary").notNull(),
+  mainTopics:
+    jsonb("main_topics").$type<
+      Array<{
+        topic: string;
+        description: string;
+        pages: number[];
+        subtopics?: Array<{
+          subtopic: string;
+          pages: number[];
+        }>;
+      }>
+    >(),
   suggestedActions: jsonb("suggested_actions").notNull().$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -347,12 +359,44 @@ export const documentSummaries = pgTable("document_summaries", {
 export type DocumentSummary = InferSelectModel<typeof documentSummaries>;
 export type NewDocumentSummary = InferInsertModel<typeof documentSummaries>;
 
+// Tutor Session schema for guided learning
+export const tutorSession = pgTable("tutor_sessions", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  chatId: uuid("chat_id")
+    .notNull()
+    .references(() => chat.id, { onDelete: "cascade" }),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  state: jsonb("state").notNull().$type<{
+    topicId: string;
+    subtopicId?: string;
+    step: "explain" | "quiz" | "remediate" | "advance" | "completed";
+    progress: {
+      totalAsked: number;
+      totalCorrect: number;
+      currentTopicAccuracy: number;
+    };
+    startedAt: string;
+    currentPages: number[];
+  }>(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type TutorSession = InferSelectModel<typeof tutorSession>;
+export type NewTutorSession = InferInsertModel<typeof tutorSession>;
+
 // Type definitions for enhanced quiz system
 export type ChatQuizQuestion = {
   id: string;
   question: string;
   type: "short_answer" | "multiple_choice";
-  options?: string[];
+  options?: Record<string, string>; // For multiple choice: { "A": "Option A", "B": "Option B", ... }
   correctAnswer: string;
   explanation: string;
   sourcePage: number;

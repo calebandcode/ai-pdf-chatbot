@@ -19,12 +19,14 @@ import {
   ToolOutput,
 } from "./elements/tool";
 import { SparklesIcon } from "./icons";
-import { QuizOfferMessage } from "./messages/QuizOfferMessage";
-import { PDFUploadMessage } from "./messages/pdf-upload-message";
 import { MessageActions } from "./message-actions";
 import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
+import { PDFUploadMessage } from "./messages/pdf-upload-message";
+import { QuizOfferMessage } from "./messages/QuizOfferMessage";
 import { PreviewAttachment } from "./preview-attachment";
+import { QuizCard, QuizResult } from "./quiz-card";
+import { TutorMessage } from "./tutor-message";
 import { Weather } from "./weather";
 
 const PurePreviewMessage = ({
@@ -112,6 +114,8 @@ const PurePreviewMessage = ({
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
 
+            console.log("Processing message part:", { type, part, index });
+
             if (type === "reasoning" && part.text?.trim().length > 0) {
               return (
                 <MessageReasoning
@@ -129,9 +133,9 @@ const PurePreviewMessage = ({
             if (type === "data-pdfUpload") {
               return (
                 <PDFUploadMessage
+                  className="w-full max-w-4xl"
                   data={part.data}
                   key={key}
-                  className="w-full max-w-4xl"
                 />
               );
             }
@@ -250,6 +254,268 @@ const PurePreviewMessage = ({
               );
             }
 
+            // New generic tool-call handler for askQuizQuestion -> render as QuizCard (no tool chrome)
+            if (
+              type === "tool-call" &&
+              (part as any).toolName === "askQuizQuestion"
+            ) {
+              const toolPart = part as any;
+              const input = toolPart.input ?? toolPart.args;
+              const question = {
+                id: input?.questionId || "q1",
+                question: input?.question || "Question not available",
+                type: "multiple_choice" as const,
+                options: input?.options || {},
+                correctAnswer: undefined,
+                explanation: undefined,
+                sourcePage: input?.sourcePage || 1,
+                difficulty: input?.difficulty || ("easy" as const),
+              };
+
+              return (
+                <div
+                  className="my-4"
+                  key={`tool-askQuizQuestion-${message.id}-${index}`}
+                >
+                  <QuizCard
+                    onSubmit={async (answer) => {
+                      try {
+                        const { submitChatQuizAnswer } = await import(
+                          "@/app/actions/chat-quiz"
+                        );
+                        const sessionDocIds = JSON.parse(
+                          sessionStorage.getItem(`chat-${chatId}-docIds`) ||
+                            "[]"
+                        );
+                        await submitChatQuizAnswer({
+                          quizId: input?.quizId,
+                          questionId: question.id,
+                          answer,
+                          documentIds: sessionDocIds,
+                        });
+                        window.dispatchEvent(
+                          new CustomEvent("refresh-messages", {
+                            detail: { chatId },
+                          })
+                        );
+                      } catch (error) {
+                        console.error("Failed to submit quiz answer:", error);
+                      }
+                    }}
+                    question={question as any}
+                    questionNumber={input?.questionNumber || 1}
+                    totalQuestions={input?.totalQuestions || 1}
+                  />
+                </div>
+              );
+            }
+
+            if (type === "tool-askQuizQuestion") {
+              const { toolCallId, state } = part;
+
+              return (
+                <Tool defaultOpen={true} key={toolCallId}>
+                  <ToolHeader state={state} type="tool-askQuizQuestion" />
+                  <ToolContent>
+                    {state === "input-available" && (
+                      <div className="w-fit max-w-2xl rounded-lg border border-gray-200 bg-white p-4">
+                        {/* Question Header - Simple */}
+                        <div className="mb-4">
+                          <div className="mb-4 flex items-center gap-3">
+                            <span className="rounded-full bg-blue-100 px-3 py-1 font-medium text-blue-800 text-sm">
+                              Question{" "}
+                              {(part as any).input?.questionNumber || 1} of{" "}
+                              {(part as any).input?.totalQuestions || 1}
+                            </span>
+                            <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-700 text-sm">
+                              Page {(part as any).input?.sourcePage || 1}
+                            </span>
+                            <span className="rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-sm">
+                              {(part as any).input?.difficulty || "easy"}
+                            </span>
+                          </div>
+
+                          <h3 className="mb-4 font-medium text-base text-gray-900 leading-relaxed">
+                            {(part as any).input?.question ||
+                              "Question not available"}
+                          </h3>
+                        </div>
+
+                        {/* Answer Options - Plain Text */}
+                        <div className="space-y-2">
+                          {Object.entries(
+                            (part as any).input?.options || {}
+                          ).map(([key, value]) => (
+                            <label
+                              className="flex cursor-pointer items-start gap-3 rounded px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50"
+                              key={key}
+                            >
+                              <input
+                                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                                name={`question-${(part as any).input?.quizId || "unknown"}`}
+                                type="radio"
+                                value={key}
+                              />
+                              <div className="flex-1">
+                                <span className="font-medium text-sm">
+                                  {key}.
+                                </span>
+                                <span className="ml-2 text-sm">{value}</span>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {state === "output-available" && (
+                      <ToolOutput
+                        errorText={undefined}
+                        output={
+                          "error" in (part as any).output ? (
+                            <div className="rounded border p-2 text-red-500">
+                              Error: {String((part as any).output.error)}
+                            </div>
+                          ) : (
+                            <div className="text-green-600 text-sm">
+                              ✅ Quiz question answered successfully
+                            </div>
+                          )
+                        }
+                      />
+                    )}
+                  </ToolContent>
+                </Tool>
+              );
+            }
+
+            if (type === "data-quiz-result") {
+              console.log("Rendering quiz result:", part);
+              const quizResultPart = part as any;
+              return (
+                <div
+                  className="my-4"
+                  key={`quiz-result-${quizResultPart.data.quizId}-${index}`}
+                >
+                  <QuizResult
+                    explanation={quizResultPart.data.explanation}
+                    isCorrect={quizResultPart.data.isCorrect}
+                    isLastQuestion={quizResultPart.data.isLastQuestion}
+                    onFinish={() => {
+                      console.log("Quiz finished");
+                    }}
+                    onNext={() => {
+                      // Next question will be automatically posted by the server
+                      console.log("Next question requested");
+                    }}
+                    question={quizResultPart.data.question}
+                    userAnswer={quizResultPart.data.userAnswer}
+                  />
+                </div>
+              );
+            }
+
+            if (type === "data-quiz-question") {
+              console.log("Rendering quiz question:", part);
+              console.log("Quiz question data:", part.data);
+              const quizQuestionPart = part as any;
+              console.log(
+                "Quiz question part after casting:",
+                quizQuestionPart
+              );
+              return (
+                <div
+                  className="my-4"
+                  key={`quiz-question-${quizQuestionPart.data.quizId}-${index}`}
+                >
+                  <QuizCard
+                    onSubmit={async (answer) => {
+                      try {
+                        console.log("Quiz answer submitted:", answer);
+                        // Import the server action dynamically
+                        const { submitChatQuizAnswer } = await import(
+                          "@/app/actions/chat-quiz"
+                        );
+
+                        // Get documentIds from sessionStorage
+                        const sessionDocIds = JSON.parse(
+                          sessionStorage.getItem(`chat-${chatId}-docIds`) ||
+                            "[]"
+                        );
+
+                        await submitChatQuizAnswer({
+                          quizId: quizQuestionPart.data.quizId,
+                          questionId: quizQuestionPart.data.question.id,
+                          answer,
+                          documentIds: sessionDocIds,
+                        });
+
+                        // Trigger message refresh
+                        window.dispatchEvent(
+                          new CustomEvent("refresh-messages", {
+                            detail: { chatId },
+                          })
+                        );
+                      } catch (error) {
+                        console.error("Failed to submit quiz answer:", error);
+                      }
+                    }}
+                    question={quizQuestionPart.data.question}
+                    questionNumber={quizQuestionPart.data.questionNumber}
+                    totalQuestions={quizQuestionPart.data.totalQuestions}
+                  />
+                </div>
+              );
+            }
+
+            // Handle old format quiz-question (fallback)
+            if (type === "quiz-question") {
+              console.log("Rendering old format quiz question:", part);
+              const quizQuestionPart = part as any;
+              return (
+                <div
+                  className="my-4"
+                  key={`quiz-question-old-${quizQuestionPart.quizId}-${index}`}
+                >
+                  <QuizCard
+                    onSubmit={async (answer) => {
+                      try {
+                        console.log("Quiz answer submitted:", answer);
+                        // Import the server action dynamically
+                        const { submitChatQuizAnswer } = await import(
+                          "@/app/actions/chat-quiz"
+                        );
+
+                        // Get documentIds from sessionStorage
+                        const sessionDocIds = JSON.parse(
+                          sessionStorage.getItem(`chat-${chatId}-docIds`) ||
+                            "[]"
+                        );
+
+                        await submitChatQuizAnswer({
+                          quizId: quizQuestionPart.quizId,
+                          questionId: quizQuestionPart.question.id,
+                          answer,
+                          documentIds: sessionDocIds,
+                        });
+
+                        // Trigger message refresh
+                        window.dispatchEvent(
+                          new CustomEvent("refresh-messages", {
+                            detail: { chatId },
+                          })
+                        );
+                      } catch (error) {
+                        console.error("Failed to submit quiz answer:", error);
+                      }
+                    }}
+                    question={quizQuestionPart.question}
+                    questionNumber={quizQuestionPart.questionNumber}
+                    totalQuestions={quizQuestionPart.totalQuestions}
+                  />
+                </div>
+              );
+            }
+
             if (type === "tool-requestSuggestions") {
               const { toolCallId, state } = part;
 
@@ -283,7 +549,21 @@ const PurePreviewMessage = ({
               );
             }
 
-            return null;
+            // Fallback for unrecognized message types
+            console.warn("Unrecognized message part type:", type, part);
+            return (
+              <div
+                className="rounded-lg border border-yellow-200 bg-yellow-50 p-4"
+                key={key}
+              >
+                <p className="text-sm text-yellow-800">
+                  Unrecognized message type: {type}
+                </p>
+                <pre className="mt-2 text-xs text-yellow-700">
+                  {JSON.stringify(part, null, 2)}
+                </pre>
+              </div>
+            );
           })}
 
           {!isReadonly && (
