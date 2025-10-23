@@ -64,6 +64,20 @@
       "when": 1760454369052,
       "tag": "0008_wild_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1760950159182,
+      "tag": "0009_awesome_marrow",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1761120467299,
+      "tag": "0010_romantic_prowler",
+      "breakpoints": true
     }
   ]
 }

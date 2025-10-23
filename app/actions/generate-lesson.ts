@@ -88,7 +88,7 @@ export async function getDocumentLessons({
     });
 
     return { lessons };
-  } catch (error) {
+  } catch {
     throw new ChatSDKError("bad_request:api", "Failed to fetch lessons");
   }
 }

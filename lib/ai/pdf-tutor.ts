@@ -1,9 +1,19 @@
-import { generateText } from "ai";
+import { generateObject, generateText } from "ai";
+import { z } from "zod";
 import type { ChatQuizQuestion, DocumentChunk } from "@/lib/db/schema";
 import { myProvider } from "./providers";
 
 export type DocumentSummaryResult = {
   summary: string;
+  mainTopics: Array<{
+    topic: string;
+    description: string;
+    pages: number[];
+    subtopics?: Array<{
+      subtopic: string;
+      pages: number[];
+    }>;
+  }>;
   suggestedActions: string[];
   pageCount: number;
 };
@@ -27,6 +37,8 @@ export type AnswerGradeResult = {
   confidence: number;
   feedback: string;
   sourcePage: number;
+  isCorrect: boolean;
+  explanation: string;
 };
 
 /**
@@ -43,50 +55,81 @@ export async function generateDocumentSummary({
   const content = chunks
     .map((chunk) => `Page ${chunk.page}: ${chunk.content}`)
     .join("\n\n");
-
-  const { text } = await generateText({
-    model: myProvider.languageModel("chat-model"),
-    system: `You are an AI tutor. Generate a concise summary and suggested actions for a PDF document.
-
-Requirements:
-- Summary should be 1-2 sentences highlighting the main topic
-- Suggested actions should be 4 specific options the user can take
-- Always mention the page count
-- Be encouraging and helpful
-
-Format your response as JSON:
-{
-  "summary": "Brief summary of the document",
-  "suggestedActions": ["Action 1", "Action 2", "Action 3", "Action 4"]
-}`,
-    prompt: `Document: "${title}" (${pageCount} pages)
-
-Content preview:
-${content.slice(0, 2000)}...
-
-Generate a summary and suggested actions for this document.`,
+  // Use structured output to avoid JSON parsing failures and generic fallbacks
+  const SummarySchema = z.object({
+    summary: z
+      .string()
+      .min(40)
+      .describe(
+        "2-3 sentences, teacher-like, include the main topic and why it matters for exams, and mention total pages."
+      ),
+    mainTopics: z
+      .array(
+        z.object({
+          topic: z.string().describe("Main topic name"),
+          description: z
+            .string()
+            .describe("Brief description of what this topic covers"),
+          pages: z
+            .array(z.number())
+            .describe("Page numbers where this topic appears"),
+          subtopics: z
+            .array(
+              z.object({
+                subtopic: z.string().describe("Subtopic name"),
+                pages: z
+                  .array(z.number())
+                  .describe("Page numbers for this subtopic"),
+              })
+            )
+            .optional()
+            .describe("Key subtopics within this main topic"),
+        })
+      )
+      .min(2)
+      .max(8)
+      .describe(
+        "Main topics covered in the document with their subtopics and page references"
+      ),
+    suggestedActions: z
+      .array(z.string().min(5))
+      .min(3)
+      .max(6)
+      .describe(
+        "Concrete learning activities like 'Generate 10 practice questions on X', 'Create flashcards for key terms', 'Explain concept Y with examples', etc."
+      ),
   });
 
-  try {
-    const parsed = JSON.parse(text);
-    return {
-      summary: parsed.summary,
-      suggestedActions: parsed.suggestedActions,
-      pageCount,
-    };
-  } catch (_error) {
-    // Fallback if JSON parsing fails
-    return {
-      summary: `I've read "${title}" (${pageCount} pages). This document covers important topics that I can help you explore.`,
-      suggestedActions: [
-        "Show lesson summaries",
-        "Generate practice questions",
-        "Create flashcards",
-        "Ask specific questions",
-      ],
-      pageCount,
-    };
-  }
+  const { object } = await generateObject({
+    model: myProvider.languageModel("chat-model"),
+    schema: SummarySchema,
+    system:
+      "You are an experienced AI tutor. Write warm, encouraging, exam-focused guidance. Prefer specific actions over generic ones.",
+    prompt: `Analyze this document and produce a comprehensive study-oriented summary with structured topics and concrete actions.
+
+Document title: "${title}"
+Total pages: ${pageCount}
+
+Content preview (truncate as needed, do not repeat verbatim):
+${content.slice(0, 6000)}
+
+Requirements:
+- The summary must sound like a teacher introducing the topic to a student preparing for an exam.
+- Mention the total page count explicitly.
+- Extract main topics with their descriptions and page references.
+- Identify key subtopics within each main topic.
+- Avoid generic phrasing like "important topics". Name the main concepts when possible.
+- Suggested actions must be click-worthy, actionable options a student can take right now.
+- Be specific about page numbers where topics appear.
+`,
+  });
+
+  return {
+    summary: object.summary,
+    mainTopics: object.mainTopics,
+    suggestedActions: object.suggestedActions,
+    pageCount,
+  };
 }
 
 /**
@@ -125,8 +168,14 @@ Format your response as JSON:
     {
       "id": "q1",
       "question": "Question text?",
-      "type": "short_answer",
-      "correctAnswer": "Correct answer",
+      "type": "multiple_choice",
+      "options": {
+        "A": "Option A",
+        "B": "Option B",
+        "C": "Option C",
+        "D": "Option D"
+      },
+      "correctAnswer": "A",
       "explanation": "Brief explanation",
       "sourcePage": 1,
       "difficulty": "easy"
@@ -176,9 +225,16 @@ Create a focused lesson with questions and flashcards.`,
         {
           id: "q1",
           question: "What is the main topic of this section?",
-          type: "short_answer" as const,
-          correctAnswer: "The main topic",
-          explanation: "Based on the content",
+          type: "multiple_choice" as const,
+          options: {
+            A: "General overview",
+            B: "Specific technical details",
+            C: "Historical context",
+            D: "Practical applications",
+          },
+          correctAnswer: "A",
+          explanation:
+            "Based on the content, this section provides a general overview of the main topic.",
           sourcePage: sourcePages[0] || 1,
           difficulty: "easy" as const,
         },
@@ -206,13 +262,15 @@ export async function gradeAnswer({
 }): Promise<AnswerGradeResult> {
   const { text } = await generateText({
     model: myProvider.languageModel("chat-model"),
-    system: `You are an AI tutor grading student answers. Be fair but thorough.
+    system: `You are an experienced teacher grading a student's answer. Be encouraging, helpful, and educational.
 
 Requirements:
 - Compare student answer with correct answer semantically
 - Consider partial credit for partially correct answers
-- Provide helpful feedback
+- Provide encouraging, teacher-like feedback
 - Always cite the source page
+- Explain WHY the answer is correct/incorrect
+- Give study tips for improvement
 
 Grading criteria:
 - correct: Answer is substantially correct (80%+ accuracy)
@@ -223,7 +281,7 @@ Format your response as JSON:
 {
   "grade": "correct|partial|incorrect",
   "confidence": 0.85,
-  "feedback": "Helpful feedback with encouragement",
+  "feedback": "Encouraging teacher feedback with explanation",
   "sourcePage": 1
 }`,
     prompt: `Question: ${question.question}
@@ -243,6 +301,8 @@ Grade the student's answer and provide feedback.`,
       feedback:
         parsed.feedback || "Good attempt! Let's review the correct answer.",
       sourcePage: parsed.sourcePage || question.sourcePage,
+      isCorrect: parsed.grade === "correct",
+      explanation: parsed.feedback || question.explanation,
     };
   } catch (_error) {
     // Simple fallback grading
@@ -257,6 +317,10 @@ Grade the student's answer and provide feedback.`,
         ? "Correct! Well done."
         : `Not quite right. The correct answer is: ${question.correctAnswer}`,
       sourcePage: question.sourcePage,
+      isCorrect,
+      explanation: isCorrect
+        ? "Correct! Well done."
+        : `Not quite right. The correct answer is: ${question.correctAnswer}`,
     };
   }
 }
@@ -275,14 +339,16 @@ export async function generateChatQuestions({
 
   const { text } = await generateText({
     model: myProvider.languageModel("chat-model"),
-    system: `Generate 3 engaging questions for interactive chat learning.
+    system: `Generate 3 engaging multiple choice questions for interactive classroom learning.
 
 Requirements:
-- Questions should be short-answer type
+- Questions should be multiple choice with 4 options (A, B, C, D)
 - Vary difficulty levels (easy, medium, hard)
 - Include page references
-- Make questions engaging and educational
-- Provide clear explanations
+- Make questions engaging and educational like a real teacher would ask
+- Provide clear, educational explanations
+- One correct answer and 3 plausible distractors that test understanding
+- Questions should test comprehension, not just memorization
 
 Format your response as JSON:
 {
@@ -290,9 +356,15 @@ Format your response as JSON:
     {
       "id": "q1",
       "question": "Question text?",
-      "type": "short_answer",
-      "correctAnswer": "Correct answer",
-      "explanation": "Brief explanation",
+      "type": "multiple_choice",
+      "options": {
+        "A": "Option A",
+        "B": "Option B", 
+        "C": "Option C",
+        "D": "Option D"
+      },
+      "correctAnswer": "A",
+      "explanation": "Educational explanation of why this is correct and what students should learn",
       "sourcePage": 1,
       "difficulty": "easy"
     }
@@ -306,17 +378,60 @@ Create 3 questions that will help the student learn effectively.`,
   });
 
   try {
-    const parsed = JSON.parse(text);
-    return parsed.questions || [];
-  } catch (_error) {
-    // Fallback questions
+    // Some models return JSON wrapped in ```json ... ``` fences; strip them safely
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```\s*$/i, "");
+    const parsed = JSON.parse(cleaned);
+    console.log("Generated questions:", parsed.questions);
+
+    // Validate and ensure all questions are multiple choice
+    const validatedQuestions = (parsed.questions || []).map((q: any) => {
+      if (q.type !== "multiple_choice" || !q.options) {
+        console.warn("Converting non-multiple-choice question to MCQ:", q);
+        return {
+          id: q.id || "q1",
+          question:
+            q.question || "What is the main topic discussed in this section?",
+          type: "multiple_choice" as const,
+          options: {
+            A: "General overview",
+            B: "Specific technical details",
+            C: "Historical context",
+            D: "Practical applications",
+          },
+          correctAnswer: "A",
+          explanation:
+            q.explanation ||
+            "This question covers the main concepts from the document.",
+          sourcePage: q.sourcePage || chunks[0]?.page || 1,
+          difficulty: q.difficulty || ("easy" as const),
+        };
+      }
+      return q;
+    });
+
+    return validatedQuestions;
+  } catch (error) {
+    console.error("Failed to parse AI response:", error);
+    console.log("Raw AI response:", text);
+
+    // Fallback questions with better content
     return [
       {
         id: "q1",
-        question: "What is the main topic discussed in this section?",
-        type: "short_answer" as const,
-        correctAnswer: "The main topic",
-        explanation: "This is covered in the document",
+        question: "Based on the document content, what is the primary focus?",
+        type: "multiple_choice" as const,
+        options: {
+          A: "General overview",
+          B: "Specific technical details",
+          C: "Historical context",
+          D: "Practical applications",
+        },
+        correctAnswer: "A",
+        explanation:
+          "The document provides a comprehensive overview of the main topic, covering key concepts and important details.",
         sourcePage: chunks[0]?.page || 1,
         difficulty: "easy" as const,
       },

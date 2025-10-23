@@ -1,6 +1,7 @@
 import type { InferUITool, UIMessage } from "ai";
 import { z } from "zod";
 import type { ArtifactKind } from "@/components/artifact";
+import type { askQuizQuestion } from "./ai/tools/ask-quiz-question";
 import type { createDocument } from "./ai/tools/create-document";
 import type { getWeather } from "./ai/tools/get-weather";
 import type { requestSuggestions } from "./ai/tools/request-suggestions";
@@ -22,12 +23,14 @@ type updateDocumentTool = InferUITool<ReturnType<typeof updateDocument>>;
 type requestSuggestionsTool = InferUITool<
   ReturnType<typeof requestSuggestions>
 >;
+type askQuizQuestionTool = InferUITool<typeof askQuizQuestion>;
 
 export type ChatTools = {
   getWeather: weatherTool;
   createDocument: createDocumentTool;
   updateDocument: updateDocumentTool;
   requestSuggestions: requestSuggestionsTool;
+  askQuizQuestion: askQuizQuestionTool;
 };
 
 export type CustomUIDataTypes = {
@@ -50,6 +53,28 @@ export type CustomUIDataTypes = {
     questions: QuizQuestion[];
   };
   quizResult: QuizResult;
+  pdfUpload: {
+    documentTitle: string;
+    pageCount: number;
+    summary: string;
+    suggestedActions: string[];
+    documentId: string;
+    chatId: string;
+  };
+  "data-quiz-question": {
+    question: any;
+    questionNumber: number;
+    totalQuestions: number;
+    quizId: string;
+  };
+  "data-quiz-result": {
+    question: any;
+    userAnswer: string;
+    isCorrect: boolean;
+    explanation: string;
+    isLastQuestion: boolean;
+    quizId: string;
+  };
 };
 
 export type ChatMessage = UIMessage<

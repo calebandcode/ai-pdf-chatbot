@@ -67,7 +67,7 @@ export function Chat({
   const currentModelIdRef = useRef(currentModelId);
 
   // Get documentIds from sessionStorage for this chat
-  const [sessionDocIds, setSessionDocIds] = useState<string[]>(() => {
+  const sessionDocIds = (() => {
     if (typeof window !== "undefined") {
       try {
         return JSON.parse(sessionStorage.getItem(`chat-${id}-docIds`) || "[]");
@@ -76,7 +76,7 @@ export function Chat({
       }
     }
     return [];
-  });
+  })();
 
   // Combine initial documentIds with sessionStorage documentIds
   const allDocumentIds = [...(documentIds || []), ...sessionDocIds];
@@ -84,20 +84,6 @@ export function Chat({
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
   }, [currentModelId]);
-
-  // Function to refresh documentIds from sessionStorage
-  const refreshDocumentIds = () => {
-    if (typeof window !== "undefined") {
-      try {
-        const newDocIds = JSON.parse(
-          sessionStorage.getItem(`chat-${id}-docIds`) || "[]"
-        );
-        setSessionDocIds(newDocIds);
-      } catch {
-        setSessionDocIds([]);
-      }
-    }
-  };
 
   const {
     messages,
@@ -136,6 +122,10 @@ export function Chat({
     },
     onFinish: () => {
       mutate(unstable_serialize(getChatHistoryPaginationKey));
+      // Also refresh messages to ensure we have the latest from database
+      window.dispatchEvent(
+        new CustomEvent("refresh-messages", { detail: { chatId: id } })
+      );
     },
     onError: (error) => {
       if (error instanceof ChatSDKError) {
@@ -194,18 +184,44 @@ export function Chat({
             },
           ],
         });
-        toast.success(
-          `Sent PDF marker message: PDF uploaded: ${pending.title}`
-        );
+        toast({
+          type: "success",
+          description: `PDF uploaded: ${pending.title}`,
+        });
         console.log("Sent PDF marker message for new chat:", pending);
         sessionStorage.removeItem("pendingPdfMessage");
       }
-    } catch {
-      // Silently ignore parsing/storage errors
+    } catch (error) {
+      console.warn("Error handling pending PDF message:", error);
     }
     // Only on initial render for the sessionStorage effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentIds, sendMessage]);
+
+  // Listen for message refresh events from server actions
+  useEffect(() => {
+    const handleRefreshMessages = async (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const { chatId: eventChatId } = customEvent.detail;
+      if (eventChatId === id) {
+        try {
+          // Fetch latest messages from server
+          const response = await fetch(`/api/chat/${id}/messages`);
+          if (response.ok) {
+            const latestMessages = await response.json();
+            setMessages(latestMessages);
+          }
+        } catch (error) {
+          console.warn("Failed to refresh messages:", error);
+        }
+      }
+    };
+
+    window.addEventListener("refresh-messages", handleRefreshMessages);
+    return () => {
+      window.removeEventListener("refresh-messages", handleRefreshMessages);
+    };
+  }, [id, setMessages]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
@@ -250,7 +266,6 @@ export function Chat({
               chatId={id}
               input={input}
               messages={messages}
-              onDocumentUploaded={refreshDocumentIds}
               onModelChange={setCurrentModelId}
               selectedModelId={currentModelId}
               selectedVisibilityType={visibilityType}

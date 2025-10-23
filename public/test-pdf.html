@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>PDF Test</title>
+  </head>
+  <body>
+    <h1>PDF Upload Test</h1>
+    <form id="pdfForm" enctype="multipart/form-data">
+      <input type="file" id="pdfFile" accept=".pdf" />
+      <button type="submit">Test PDF Parsing</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+      document
+        .getElementById("pdfForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const fileInput = document.getElementById("pdfFile");
+          const file = fileInput.files[0];
+
+          if (!file) {
+            alert("Please select a PDF file");
+            return;
+          }
+
+          const formData = new FormData();
+          formData.append("file", file);
+
+          try {
+            const response = await fetch("/api/test-pdf", {
+              method: "POST",
+              body: formData,
+            });
+
+            const result = await response.json();
+            document.getElementById("result").innerHTML =
+              "<pre>" + JSON.stringify(result, null, 2) + "</pre>";
+          } catch (error) {
+            document.getElementById("result").innerHTML =
+              "<pre>Error: " + error.message + "</pre>";
+          }
+        });
+    </script>
+  </body>
+</html>

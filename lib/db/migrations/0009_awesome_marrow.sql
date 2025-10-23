@@ -1,0 +1,1 @@
+ALTER TABLE "document_summaries" ADD COLUMN "main_topics" jsonb;
