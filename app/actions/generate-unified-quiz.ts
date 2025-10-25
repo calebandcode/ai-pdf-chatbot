@@ -296,7 +296,7 @@ Generate exactly the requested number of questions.`,
   } catch (error) {
     console.error("Error generating unified quiz:", error);
     throw new ChatSDKError(
-      "internal_server_error:api",
+      "offline:api",
       "Failed to generate quiz questions"
     );
   }

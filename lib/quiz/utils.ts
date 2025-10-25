@@ -76,10 +76,7 @@ export function toQuizQuestions(questions: Question[]): QuizQuestion[] {
         ? "hard"
         : ("easy" as QuizQuestion["difficulty"]),
     options: normalizeOptions(question.options, question.id),
-    correct:
-      typeof question.correct === "string"
-        ? question.correct
-        : question.correct?.toString() ?? "",
+    correct: question.correct ?? "",
     explanation: question.explanation ?? "",
     sourceRefs: normalizeSourceRefs(question.sourceRefs),
   }));
