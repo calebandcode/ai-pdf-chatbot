@@ -13,13 +13,9 @@ export const askQuizQuestion = {
       .number()
       .describe("Page number where question content appears"),
   }),
-  onInputAvailable: async (options) => {
+  onInputAvailable: async (options: { input: any }) => {
     // This tool call will be handled by the UI component
     // The actual quiz question will be rendered in the message component
-    return {
-      success: true,
-      message: "Quiz question displayed, waiting for user response",
-      questionData: options.input,
-    };
+    return;
   },
 };

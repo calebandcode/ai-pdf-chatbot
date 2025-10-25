@@ -1,6 +1,7 @@
 "use server";
 
 import { drizzle } from "drizzle-orm/postgres-js";
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import postgres from "postgres";
 import { z } from "zod";
@@ -68,19 +69,23 @@ export async function startGuidedSession(
 
     // Store in sessionStorage (will be handled client-side)
     // For now, we'll store in DB as fallback
-    await db.tutorSession.upsert({
-      where: { chatId },
-      create: {
+    try {
+      await db.insert(tutorSession).values({
         chatId,
         userId: session.user.id,
-        state: JSON.stringify(sessionState),
+        state: sessionState,
+        createdAt: new Date(),
         updatedAt: new Date(),
-      },
-      update: {
-        state: JSON.stringify(sessionState),
-        updatedAt: new Date(),
-      },
-    });
+      });
+    } catch (error) {
+      // If it already exists, update it
+      await db.update(tutorSession)
+        .set({
+          state: sessionState,
+          updatedAt: new Date(),
+        })
+        .where(eq(tutorSession.chatId, chatId));
+    }
 
     // Generate conversational explanation
     const explanationPrompt = `You are an AI tutor helping a student learn from their study material. 
@@ -174,15 +179,14 @@ export async function handleTutorCommand(
 
   try {
     // Get current session state
-    const tutorSession = await db.tutorSession.findUnique({
-      where: { chatId },
-    });
+    const tutorSessionRecord = await db.select().from(tutorSession).where(eq(tutorSession.chatId, chatId)).limit(1);
 
-    if (!tutorSession) {
+    if (!tutorSessionRecord || tutorSessionRecord.length === 0) {
       throw new Error("No active tutor session");
     }
 
-    const sessionState: TutorSessionState = JSON.parse(tutorSession.state);
+    const sessionData = tutorSessionRecord[0];
+    const sessionState: TutorSessionState = sessionData.state as TutorSessionState;
 
     let responseMessage = "";
     let newStep: TutorSessionState["step"] = sessionState.step;
@@ -216,13 +220,12 @@ export async function handleTutorCommand(
       step: newStep,
     };
 
-    await db.tutorSession.update({
-      where: { chatId },
-      data: {
-        state: JSON.stringify(updatedState),
+    await db.update(tutorSession)
+      .set({
+        state: updatedState,
         updatedAt: new Date(),
-      },
-    });
+      })
+      .where(eq(tutorSession.chatId, chatId));
 
     // Create response message
     await saveMessages({
@@ -265,15 +268,14 @@ export async function resumeGuidedSession(chatId: string) {
   }
 
   try {
-    const tutorSession = await db.tutorSession.findUnique({
-      where: { chatId },
-    });
+    const tutorSessionRecord = await db.select().from(tutorSession).where(eq(tutorSession.chatId, chatId)).limit(1);
 
-    if (!tutorSession) {
+    if (!tutorSessionRecord || tutorSessionRecord.length === 0) {
       return { success: false, reason: "No active session" };
     }
 
-    const sessionState: TutorSessionState = JSON.parse(tutorSession.state);
+    const sessionData = tutorSessionRecord[0];
+    const sessionState: TutorSessionState = sessionData.state as TutorSessionState;
 
     if (sessionState.step === "completed") {
       return { success: false, reason: "Session already completed" };
@@ -293,9 +295,6 @@ export async function resumeGuidedSession(chatId: string) {
         break;
       case "advance":
         resumeMessage = "Great progress! Let's move to the next topic.";
-        break;
-      case "completed":
-        resumeMessage = "Session completed!";
         break;
     }
 

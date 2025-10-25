@@ -21,6 +21,7 @@ import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { generateQuiz } from "@/app/actions/generate-quiz";
 import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
+import { processContent, createChatWithContent } from "@/app/actions/process-content";
 import { SelectItem } from "@/components/ui/select";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
@@ -44,6 +45,7 @@ import {
   PaperclipIcon,
   StopIcon,
 } from "./icons";
+import { ContentTypeMenu, type ContentType } from "./content-type-menu";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
@@ -86,6 +88,10 @@ function PureMultimodalInput({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+  
+  // Content type state management
+  const [contentType, setContentType] = useState<ContentType>("pdf");
+  const [showAutoDetected, setShowAutoDetected] = useState(false);
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -127,7 +133,77 @@ function PureMultimodalInput({
   }, [input, setLocalStorageInput]);
 
   const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(event.target.value);
+    const value = event.target.value;
+    setInput(value);
+    
+    // Enhanced auto-detection logic
+    if (value.trim()) {
+      const trimmedValue = value.trim().toLowerCase();
+      
+      // YouTube detection (more comprehensive)
+      if (trimmedValue.includes('youtube.com') || 
+          trimmedValue.includes('youtu.be') || 
+          trimmedValue.includes('m.youtube.com') ||
+          trimmedValue.match(/youtube\.com\/watch\?v=/)) {
+        setContentType('youtube');
+        setShowAutoDetected(true);
+        setTimeout(() => setShowAutoDetected(false), 2000);
+      }
+      // Other video platforms
+      else if (trimmedValue.includes('vimeo.com') || 
+               trimmedValue.includes('dailymotion.com') ||
+               trimmedValue.includes('twitch.tv')) {
+        setContentType('link'); // Treat as regular link for now
+        setShowAutoDetected(true);
+        setTimeout(() => setShowAutoDetected(false), 2000);
+      }
+      // Website/URL detection (more comprehensive)
+      else if (trimmedValue.match(/^https?:\/\/.+/)) {
+        setContentType('link');
+        setShowAutoDetected(true);
+        setTimeout(() => setShowAutoDetected(false), 2000);
+      }
+      // Text content detection (improved logic)
+      else if (value.length > 50 && 
+               !trimmedValue.includes('http') && 
+               !trimmedValue.includes('www.') &&
+               trimmedValue.split(' ').length > 5) {
+        setContentType('text');
+        setShowAutoDetected(true);
+        setTimeout(() => setShowAutoDetected(false), 2000);
+      }
+      // Reset to PDF for short text or unclear content
+      else if (value.length < 20) {
+        setContentType('pdf');
+      }
+    } else {
+      // Reset to PDF when input is empty
+      setContentType('pdf');
+    }
+  };
+
+  const handleContentTypeSelect = (type: ContentType) => {
+    setContentType(type);
+    // Reset input when switching to PDF mode
+    if (type === 'pdf') {
+      setInput('');
+    }
+  };
+
+  // Dynamic placeholder based on content type
+  const getPlaceholder = () => {
+    switch (contentType) {
+      case 'pdf':
+        return 'Upload PDF or drag & drop to start learning...';
+      case 'link':
+        return 'Paste a webpage URL to analyze...';
+      case 'youtube':
+        return 'Paste a YouTube URL to get transcript...';
+      case 'text':
+        return 'Enter your text to analyze...';
+      default:
+        return 'Send a message or drag & drop a PDF to start learning...';
+    }
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -295,6 +371,79 @@ function PureMultimodalInput({
       return;
     }
 
+    // Handle different content types (non-PDF)
+    if (contentType !== "pdf" && trimmedInput) {
+      try {
+        setIsProcessingAttachments(true);
+        
+        const result = await processContent({
+          contentType,
+          content: trimmedInput,
+          title: undefined, // Let the system generate a title
+        });
+
+        if (result.success && result.data) {
+          // Create a chat with the processed content
+          const chatResult = await createChatWithContent(result.data);
+          
+          if (chatResult.success && chatResult.data) {
+            // Add messages to show the processed content
+            setMessages([
+              {
+                id: generateUUID(),
+                role: "user",
+                parts: [
+                  {
+                    type: "text",
+                    text: `I've shared ${contentType === 'youtube' ? 'a YouTube video' : 
+                                    contentType === 'link' ? 'a website link' : 
+                                    'some text'} for analysis.`,
+                  },
+                ],
+              },
+              {
+                id: generateUUID(),
+                role: "assistant",
+                parts: [
+                  {
+                    type: "text",
+                    text: `I've processed your ${contentType === 'youtube' ? 'YouTube video' : 
+                                          contentType === 'link' ? 'website content' : 
+                                          'text content'}. Here's what I found:\n\n**${result.data.title}**\n\n${result.data.content.substring(0, 500)}${result.data.content.length > 500 ? '...' : ''}`,
+                  },
+                ],
+              },
+            ]);
+
+            setInput("");
+            setLocalStorageInput("");
+            resetHeight();
+            if (width && width > 768) {
+              textareaRef.current?.focus();
+            }
+
+            toast.success(`${contentType === 'youtube' ? 'YouTube video' : 
+                          contentType === 'link' ? 'Website content' : 
+                          'Text content'} processed successfully!`);
+          } else {
+            throw new Error(chatResult.error || "Failed to create chat");
+          }
+        } else {
+          throw new Error(result.error || "Failed to process content");
+        }
+      } catch (error) {
+        console.error("Failed to process content", error);
+        toast.error(
+          `We couldn't process your ${contentType === 'youtube' ? 'YouTube video' : 
+                                    contentType === 'link' ? 'website link' : 
+                                    'text content'}. Please try again shortly.`
+        );
+      } finally {
+        setIsProcessingAttachments(false);
+      }
+      return;
+    }
+
     sendMessage({
       role: "user",
       parts: [
@@ -322,6 +471,7 @@ function PureMultimodalInput({
   }, [
     attachments,
     chatId,
+    contentType,
     isProcessingAttachments,
     input,
     resetHeight,
@@ -451,19 +601,19 @@ function PureMultimodalInput({
 
         try {
           const uploadPromises = imageFiles.map((file) => uploadFile(file));
-          const uploadedAttachments = await Promise.all(uploadPromises);
-          const successfullyUploadedAttachments = uploadedAttachments.filter(
-            (attachment) => attachment !== undefined
-          );
+        const uploadedAttachments = await Promise.all(uploadPromises);
+        const successfullyUploadedAttachments = uploadedAttachments.filter(
+          (attachment) => attachment !== undefined
+        );
 
-          setAttachments((currentAttachments) => [
-            ...currentAttachments,
-            ...successfullyUploadedAttachments,
-          ]);
-        } catch (error) {
-          console.error("Error uploading files!", error);
-        } finally {
-          setUploadQueue([]);
+        setAttachments((currentAttachments) => [
+          ...currentAttachments,
+          ...successfullyUploadedAttachments,
+        ]);
+      } catch (error) {
+        console.error("Error uploading files!", error);
+      } finally {
+        setUploadQueue([]);
         }
       }
     },
@@ -534,7 +684,7 @@ function PureMultimodalInput({
             </p>
           </div>
         </div>
-      )}
+        )}
 
       <input
         accept=".pdf"
@@ -602,7 +752,7 @@ function PureMultimodalInput({
             maxHeight={200}
             minHeight={44}
             onChange={handleInput}
-            placeholder="Send a message or drag & drop a PDF to start learning..."
+            placeholder={getPlaceholder()}
             ref={textareaRef}
             rows={1}
             value={input}
@@ -611,6 +761,19 @@ function PureMultimodalInput({
         </div>
         <PromptInputToolbar className="!border-top-0 border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
+            <ContentTypeMenu
+              onContentTypeSelect={handleContentTypeSelect}
+              disabled={status !== "ready"}
+              fileInputRef={fileInputRef}
+            />
+            {showAutoDetected && (
+              <div className="flex items-center gap-1 rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500"></span>
+                Auto-detected: {contentType === 'youtube' ? 'YouTube Video' : 
+                               contentType === 'link' ? 'Website Link' : 
+                               contentType === 'text' ? 'Plain Text' : 'PDF'}
+              </div>
+            )}
             <AttachmentsButton
               fileInputRef={fileInputRef}
               selectedModelId={selectedModelId}
