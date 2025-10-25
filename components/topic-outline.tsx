@@ -65,11 +65,14 @@ export function TopicOutline({
     useBubble();
 
   const handleQuizBubble = async (
-    event: React.MouseEvent,
+    event: React.MouseEvent | { currentTarget: HTMLElement },
     topic: string,
     pages: number[]
   ) => {
-    event.stopPropagation();
+    // Handle both real events and mock events
+    if ('stopPropagation' in event && typeof event.stopPropagation === 'function') {
+      event.stopPropagation();
+    }
     const element = event.currentTarget as HTMLElement;
 
     try {
@@ -215,10 +218,12 @@ export function TopicOutline({
         topic,
         content: topicContent[topic] || "Loading additional information...",
         sourcePage: pages[0] || 1,
+        pages: pages,
         relatedTopics: topics
           .filter((t) => t.topic !== topic)
           .slice(0, 3)
           .map((t) => t.topic),
+        sources: pages.length > 0 ? `${pages.length} references` : "No sources available",
       },
       sourceElement: element,
     });
@@ -533,7 +538,7 @@ export function TopicOutline({
             transition={{ duration: 0.3, delay: index * 0.1 }}
           >
             {/* Topic Header - Story-like Style with Subtle Background */}
-            <div className="group rounded-lg border border-transparent bg-gray-50/50 p-4 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50">
+            <div className="group rounded-lg border border-transparent bg-gray-50/50 p-4 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50" data-topic={topic.topic}>
               <div className="flex items-start justify-between gap-4">
                 {/* Left side - Topic info */}
                 <div className="min-w-0 flex-1">
@@ -573,23 +578,6 @@ export function TopicOutline({
                 {/* Right side - Topic action buttons */}
                 <div className="flex-shrink-0">
                   <div className="flex items-center gap-2">
-                    {/* Quiz button */}
-                    <motion.div
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                    >
-                      <button
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-blue-600 transition-colors hover:bg-blue-200"
-                        data-bubble-trigger
-                        onClick={(e) =>
-                          handleQuizBubble(e, topic.topic, topic.pages)
-                        }
-                        type="button"
-                      >
-                        <HelpCircle className="h-4 w-4" />
-                      </button>
-                    </motion.div>
-
                     {/* Learn More button */}
                     <motion.div
                       whileHover={{ scale: 1.05 }}
@@ -603,26 +591,25 @@ export function TopicOutline({
                         }
                         type="button"
                       >
-                        <BookOpen className="h-4 w-4" />
+                        <HelpCircle className="h-4 w-4" />
                       </button>
                     </motion.div>
 
-                    {/* Save button */}
-                    <motion.div
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                    >
-                      <button
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-100 text-purple-600 transition-colors hover:bg-purple-200"
-                        data-bubble-trigger
-                        onClick={(e) =>
-                          handleSaveBubble(e, topic.topic, topic.pages)
-                        }
-                        type="button"
+                    {/* Take Quiz button */}
+                    <div className="flex justify-end">
+                      <Suggestion
+                        onClick={() => {
+                          const mockEvent = {
+                            currentTarget: document.querySelector(`[data-topic="${topic.topic}"]`) as HTMLElement,
+                          };
+                          handleQuizBubble(mockEvent, topic.topic, topic.pages);
+                        }}
+                        suggestion="Take Quiz"
                       >
-                        <Save className="h-4 w-4" />
-                      </button>
-                    </motion.div>
+                        <HelpCircle className="mr-0.5 h-4 w-4" />
+                        Quiz
+                      </Suggestion>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -865,7 +852,7 @@ export function TopicOutline({
                                           }}
                                           suggestion="Test Understanding"
                                         >
-                                          <HelpCircle className="mr-2 h-4 w-4" />
+                                          <HelpCircle className="mr-0.5 h-4 w-4" />
                                           Test Understanding
                                         </Suggestion>
                                       </div>

@@ -37,8 +37,8 @@ function NotebookCard({ chat, onDelete }: { chat: Chat; onDelete: (chatId: strin
     initialVisibilityType: chat.visibility,
   });
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+  const formatDate = (dateInput: string | Date) => {
+    const date = new Date(dateInput);
     return date.toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
@@ -46,14 +46,14 @@ function NotebookCard({ chat, onDelete }: { chat: Chat; onDelete: (chatId: strin
     });
   };
 
-  const formatLastActivity = (dateString: string) => {
-    const date = new Date(dateString);
+  const formatLastActivity = (dateInput: string | Date) => {
+    const date = new Date(dateInput);
     const now = new Date();
     const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
     
     if (diffInHours < 1) return "Just now";
     if (diffInHours < 24) return `${diffInHours}h ago`;
-    return formatDate(dateString);
+    return formatDate(dateInput);
   };
 
   // Use chat title directly (same as sidebar)
@@ -72,7 +72,7 @@ function NotebookCard({ chat, onDelete }: { chat: Chat; onDelete: (chatId: strin
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -1 }}
+      whileHover={{ y: -1, boxShadow: "0 4px 8px rgba(0,0,0,0.06)" }}
       transition={{ duration: 0.2 }}
       className="group relative rounded-sm border border-gray-100 bg-white p-4 transition-all duration-200 hover:border-gray-200 cursor-pointer"
       onClick={handleClick}
@@ -246,8 +246,9 @@ export function NotebookCards() {
         <motion.div
           key={chat.id}
           initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: index * 0.1 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.4, delay: index * 0.05 }}
         >
           <NotebookCard chat={chat} onDelete={handleDeleteChat} />
         </motion.div>

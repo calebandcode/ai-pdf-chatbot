@@ -8,7 +8,9 @@ type LearnMoreBubbleProps = {
     topic: string;
     content: string;
     sourcePage: number;
+    pages?: number[];
     relatedTopics?: string[];
+    sources?: string;
   };
   onClose: () => void;
 };
@@ -32,7 +34,17 @@ export function LearnMoreBubble({ data, onClose }: LearnMoreBubbleProps) {
             {data.topic}
           </span>
         </div>
-        <p className="text-blue-700 text-xs">Source: Page {data.sourcePage}</p>
+        <div className="space-y-1">
+          <p className="text-blue-700 text-xs">
+            Source: Page {data.sourcePage}
+            {data.pages && data.pages.length > 1 && ` (Pages ${data.pages.join(', ')})`}
+          </p>
+          {data.sources && (
+            <p className="text-blue-600 text-xs font-medium">
+              {data.sources}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Content */}
