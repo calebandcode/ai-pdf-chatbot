@@ -86,6 +86,23 @@ export function useScrollToBottom() {
 
   const scrollToBottom = useCallback(
     (currentScrollBehavior: ScrollBehavior = "smooth") => {
+      if (containerRef.current) {
+        const container = containerRef.current;
+        const scrollOptions: ScrollToOptions = {
+          top: container.scrollHeight,
+          behavior: currentScrollBehavior,
+        };
+        
+        // Enhanced smooth scrolling with better easing
+        if (currentScrollBehavior === "smooth") {
+          container.scrollTo({
+            ...scrollOptions,
+            behavior: "smooth"
+          });
+        } else {
+          container.scrollTo(scrollOptions);
+        }
+      }
       setScrollBehavior(currentScrollBehavior);
     },
     [setScrollBehavior]

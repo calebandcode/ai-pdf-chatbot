@@ -79,20 +79,31 @@ export async function startChatQuiz({
             parts: [
               {
                 type: "text",
-                text: `🎯 **Quiz Drill Started!**\n\nI've prepared ${questions.length} questions based on your document. Let's begin with the first question:`,
+                text: `🎯 **Quiz Drill Started!**\n\nI've prepared ${questions.length} questions based on your document. Let's begin!`,
               },
               {
                 type: "tool-call",
                 toolName: "askQuizQuestion",
                 toolCallId: crypto.randomUUID(),
                 args: {
-                  question: firstQuestion.question,
-                  options: firstQuestion.options || {},
-                  questionNumber: 1,
-                  totalQuestions: questions.length,
                   quizId: chatQuiz.id,
-                  difficulty: firstQuestion.difficulty || "easy",
-                  sourcePage: firstQuestion.sourcePage || 1,
+                  title,
+                  questions: questions.map((q, index) => ({
+                    id: `${chatQuiz.id}-q${index + 1}`,
+                    prompt: q.question,
+                    options: Object.entries(q.options || {}).map(
+                      ([label, text]) => ({
+                        id: label,
+                        label,
+                        text: text as string,
+                      })
+                    ),
+                    correct: q.correctAnswer || "",
+                    explanation: "",
+                    sourcePage: q.sourcePage || 1,
+                    difficulty: q.difficulty || "easy",
+                  })),
+                  totalQuestions: questions.length,
                 },
               },
             ],

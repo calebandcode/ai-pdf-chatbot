@@ -219,7 +219,7 @@ function PureMultimodalInput({
               parts: [
                 {
                   type: "text" as const,
-                  text: `📄 I've processed your PDF: "${firstDoc.title}". ${firstDoc.summary} You can now ask questions about this document.`,
+                  text: `${firstDoc.summary} You can now ask questions about this document.`,
                 },
               ],
               createdAt: new Date(),
@@ -515,11 +515,12 @@ function PureMultimodalInput({
       {messages.length === 0 &&
         attachments.length === 0 &&
         uploadQueue.length === 0 && (
-          <SuggestedActions
-            chatId={chatId}
-            selectedVisibilityType={selectedVisibilityType}
-            sendMessage={sendMessage}
-          />
+          // <SuggestedActions
+          //   chatId={chatId}
+          //   selectedVisibilityType={selectedVisibilityType}
+          //   sendMessage={sendMessage}
+          // />
+          null
         )}
 
       {isDragOver && (

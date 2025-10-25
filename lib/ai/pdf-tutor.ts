@@ -3,6 +3,10 @@ import { z } from "zod";
 import type { ChatQuizQuestion, DocumentChunk } from "@/lib/db/schema";
 import { myProvider } from "./providers";
 
+// Regex patterns for cleaning JSON responses
+const JSON_FENCE_START = /^```(?:json)?\s*/i;
+const JSON_FENCE_END = /```\s*$/i;
+
 export type DocumentSummaryResult = {
   summary: string;
   mainTopics: Array<{
@@ -61,7 +65,7 @@ export async function generateDocumentSummary({
       .string()
       .min(40)
       .describe(
-        "2-3 sentences, teacher-like, include the main topic and why it matters for exams, and mention total pages."
+        "Conversational introduction to the document, like a friendly tutor starting a study session. Sound enthusiastic and encouraging, not formal."
       ),
     mainTopics: z
       .array(
@@ -103,9 +107,16 @@ export async function generateDocumentSummary({
   const { object } = await generateObject({
     model: myProvider.languageModel("chat-model"),
     schema: SummarySchema,
-    system:
-      "You are an experienced AI tutor. Write warm, encouraging, exam-focused guidance. Prefer specific actions over generic ones.",
-    prompt: `Analyze this document and produce a comprehensive study-oriented summary with structured topics and concrete actions.
+    system: `You are a supportive AI tutor starting a study session with a student. Write conversationally, as if you're talking directly to them.
+
+Key behaviors:
+- Sound like a friendly tutor, not a formal teacher or book reviewer
+- Use conversational language ("Hey, I just finished analyzing...", "This guide is packed with...")
+- Avoid formal labels like "Summary" or "Document Analysis"
+- Be encouraging and enthusiastic about what they'll learn
+- End with a natural transition to the first topic
+- Mention the page count naturally in context`,
+    prompt: `You're starting a study session with a student who just uploaded their document. Write a conversational introduction that gets them excited to learn.
 
 Document title: "${title}"
 Total pages: ${pageCount}
@@ -113,15 +124,15 @@ Total pages: ${pageCount}
 Content preview (truncate as needed, do not repeat verbatim):
 ${content.slice(0, 6000)}
 
+Write as if you're a friendly tutor who just finished reading their document and is excited to help them learn. Sound conversational and encouraging, not formal or report-like.
+
 Requirements:
-- The summary must sound like a teacher introducing the topic to a student preparing for an exam.
-- Mention the total page count explicitly.
-- Extract main topics with their descriptions and page references.
-- Identify key subtopics within each main topic.
-- Avoid generic phrasing like "important topics". Name the main concepts when possible.
-- Suggested actions must be click-worthy, actionable options a student can take right now.
-- Be specific about page numbers where topics appear.
-`,
+- Start conversationally ("Hey, I just finished analyzing...", "Wow, this guide is packed with...")
+- Mention the page count naturally ("34 pages of pure essentials")
+- Sound enthusiastic about what they'll learn
+- End with a smooth transition to the first topic ("Let's start with...", "Ready to dive into...")
+- Avoid formal language or labels
+- Make it feel like the beginning of a learning conversation, not a document report`,
   });
 
   return {
@@ -381,8 +392,8 @@ Create 3 questions that will help the student learn effectively.`,
     // Some models return JSON wrapped in ```json ... ``` fences; strip them safely
     const cleaned = text
       .trim()
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/```\s*$/i, "");
+      .replace(JSON_FENCE_START, "")
+      .replace(JSON_FENCE_END, "");
     const parsed = JSON.parse(cleaned);
     console.log("Generated questions:", parsed.questions);
 

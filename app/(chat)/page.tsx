@@ -50,8 +50,13 @@ export default async function Page({
             });
           });
         } catch (dbError) {
-          console.error("❌ Database not available for loading messages:", dbError);
-          throw new Error(`Failed to load chat messages: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+          console.error(
+            "❌ Database not available for loading messages:",
+            dbError
+          );
+          throw new Error(
+            `Failed to load chat messages: ${dbError instanceof Error ? dbError.message : String(dbError)}`
+          );
         }
       }
 
@@ -102,7 +107,7 @@ export default async function Page({
               parts: [
                 {
                   type: "text" as const,
-                  text: `I've read your document and I'm ready to help you learn! ${summaryText || documentSummary?.summary || ""}`,
+                  text: summaryText || documentSummary?.summary || "",
                 },
               ],
               createdAt: new Date(),

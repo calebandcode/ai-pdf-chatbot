@@ -11,11 +11,19 @@ export async function explainTopic({
   pages,
   documentIds,
   chatId,
+  documentTitle,
+  previousTopics = [],
+  currentIndex = 0,
+  totalTopics = 1,
 }: {
   topic: string;
   pages: number[];
   documentIds: string[];
   chatId: string;
+  documentTitle?: string;
+  previousTopics?: string[];
+  currentIndex?: number;
+  totalTopics?: number;
 }) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -46,20 +54,28 @@ export async function explainTopic({
 
     const { text } = await generateText({
       model: myProvider.languageModel("chat-model"),
-      system: `You are an experienced teacher explaining a specific topic to a student. Be clear, engaging, and educational.
+      system: `You are a supportive AI tutor continuing an ongoing study session. You're helping a student learn from their uploaded document in a natural, conversational way.
 
-Requirements:
-- Explain the topic in simple, understandable terms
-- Use examples and analogies when helpful
-- Connect concepts to real-world applications
-- Mention specific page references
-- Be encouraging and supportive
-- Keep explanations concise but comprehensive`,
-      prompt: `Explain the topic "${topic}" based on this content from pages ${pages.join(", ")}:
+Key behaviors:
+- Continue the study conversation naturally - don't restart or reintroduce the document
+- Use conversational connectors like "Now let's explore...", "Building on that idea...", "Earlier we looked at..."
+- Keep your tone warm, encouraging, and human - like a real tutor
+- Avoid formal headers, labels, or "summary" language
+- Present everything as a natural flow of the study conversation
+- Use examples and analogies to make concepts relatable
+- Be encouraging and supportive throughout
+- Mention specific page references naturally in context`,
+      prompt: `Continue the ongoing study session. You're a friendly AI tutor guiding a student through their document.
 
+Document: ${documentTitle || "the uploaded document"}
+Previous topics covered: ${previousTopics.length > 0 ? previousTopics.join(", ") : "This is the first topic"}
+Current topic: ${topic}
+Progress: ${currentIndex + 1} of ${totalTopics}
+
+Content from pages ${pages.join(", ")}:
 ${content}
 
-Provide a clear, educational explanation that helps the student understand this topic thoroughly.`,
+Write as if you're continuing a natural conversation. Connect this topic smoothly to what we've already discussed. Use conversational language and end with an engaging question about the next step.`,
     });
 
     // Save the explanation as a message
@@ -72,7 +88,7 @@ Provide a clear, educational explanation that helps the student understand this 
           parts: [
             {
               type: "text",
-              text: `📚 **Topic Explanation: ${topic}**\n\n${text}\n\n*Source: Pages ${pages.join(", ")}*`,
+              text,
             },
           ],
           attachments: [],
@@ -93,11 +109,19 @@ export async function simplifyConcept({
   pages,
   documentIds,
   chatId,
+  documentTitle,
+  previousTopics = [],
+  currentIndex = 0,
+  totalTopics = 1,
 }: {
   concept: string;
   pages: number[];
   documentIds: string[];
   chatId: string;
+  documentTitle?: string;
+  previousTopics?: string[];
+  currentIndex?: number;
+  totalTopics?: number;
 }) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -128,21 +152,29 @@ export async function simplifyConcept({
 
     const { text } = await generateText({
       model: myProvider.languageModel("chat-model"),
-      system: `You are a patient teacher who specializes in breaking down complex concepts into simple, easy-to-understand explanations.
+      system: `You are a supportive AI tutor continuing an ongoing study session. You're helping a student learn from their uploaded document in a natural, conversational way.
 
-Requirements:
-- Simplify complex concepts using everyday language
-- Use analogies, metaphors, and examples
-- Break down concepts into smaller, digestible parts
-- Avoid jargon and technical terms when possible
-- Make it relatable and engaging
-- Mention specific page references
-- Be encouraging and supportive`,
-      prompt: `Simplify the concept "${concept}" based on this content from pages ${pages.join(", ")}:
+Key behaviors:
+- Continue the study conversation naturally - don't restart or reintroduce the document
+- Use conversational connectors like "Now let's explore...", "Building on that idea...", "Earlier we looked at..."
+- Keep your tone warm, encouraging, and human - like a real tutor
+- Avoid formal headers, labels, or "summary" language
+- Present everything as a natural flow of the study conversation
+- Break down complex concepts using everyday language and analogies
+- Make concepts relatable and engaging
+- Be encouraging and supportive throughout
+- Mention specific page references naturally in context`,
+      prompt: `Continue the ongoing study session. You're a friendly AI tutor helping a student understand a complex concept.
 
+Document: ${documentTitle || "the uploaded document"}
+Previous topics covered: ${previousTopics.length > 0 ? previousTopics.join(", ") : "This is the first topic"}
+Current concept: ${concept}
+Progress: ${currentIndex + 1} of ${totalTopics}
+
+Content from pages ${pages.join(", ")}:
 ${content}
 
-Provide a simplified explanation that makes this concept easy to understand, using analogies and examples.`,
+Write as if you're continuing a natural conversation. Break down this concept in simple terms using analogies and examples. Connect it smoothly to what we've already discussed. Use conversational language and end with an engaging question about the next step.`,
     });
 
     // Save the simplified explanation as a message
@@ -155,7 +187,7 @@ Provide a simplified explanation that makes this concept easy to understand, usi
           parts: [
             {
               type: "text",
-              text: `💡 **Simplified: ${concept}**\n\n${text}\n\n*Source: Pages ${pages.join(", ")}*`,
+              text,
             },
           ],
           attachments: [],

@@ -25,8 +25,8 @@ import { MessageReasoning } from "./message-reasoning";
 import { PDFUploadMessage } from "./messages/pdf-upload-message";
 import { QuizOfferMessage } from "./messages/QuizOfferMessage";
 import { PreviewAttachment } from "./preview-attachment";
+import { QuizArtifactTrigger } from "./quiz-artifact-trigger";
 import { QuizCard, QuizResult } from "./quiz-card";
-import { TutorMessage } from "./tutor-message";
 import { Weather } from "./weather";
 
 const PurePreviewMessage = ({
@@ -254,141 +254,37 @@ const PurePreviewMessage = ({
               );
             }
 
-            // New generic tool-call handler for askQuizQuestion -> render as QuizCard (no tool chrome)
+            // Tool-call handler for askQuizQuestion -> trigger quiz artifact
             if (
-              type === "tool-call" &&
+              (type as any) === "tool-call" &&
               (part as any).toolName === "askQuizQuestion"
             ) {
               const toolPart = part as any;
-              const input = toolPart.input ?? toolPart.args;
-              const question = {
-                id: input?.questionId || "q1",
-                question: input?.question || "Question not available",
-                type: "multiple_choice" as const,
-                options: input?.options || {},
-                correctAnswer: undefined,
-                explanation: undefined,
-                sourcePage: input?.sourcePage || 1,
-                difficulty: input?.difficulty || ("easy" as const),
-              };
+              const input = toolPart.args || toolPart.input;
 
               return (
-                <div
-                  className="my-4"
+                <QuizArtifactTrigger
                   key={`tool-askQuizQuestion-${message.id}-${index}`}
-                >
-                  <QuizCard
-                    onSubmit={async (answer) => {
-                      try {
-                        const { submitChatQuizAnswer } = await import(
-                          "@/app/actions/chat-quiz"
-                        );
-                        const sessionDocIds = JSON.parse(
-                          sessionStorage.getItem(`chat-${chatId}-docIds`) ||
-                            "[]"
-                        );
-                        await submitChatQuizAnswer({
-                          quizId: input?.quizId,
-                          questionId: question.id,
-                          answer,
-                          documentIds: sessionDocIds,
-                        });
-                        window.dispatchEvent(
-                          new CustomEvent("refresh-messages", {
-                            detail: { chatId },
-                          })
-                        );
-                      } catch (error) {
-                        console.error("Failed to submit quiz answer:", error);
-                      }
-                    }}
-                    question={question as any}
-                    questionNumber={input?.questionNumber || 1}
-                    totalQuestions={input?.totalQuestions || 1}
-                  />
-                </div>
+                  messageId={message.id}
+                  partIndex={index}
+                  quizData={{
+                    quizId: input?.quizId || crypto.randomUUID(),
+                    title: input?.title,
+                    questions: input?.questions,
+                    totalQuestions: input?.totalQuestions,
+                    // Legacy single question format
+                    question: input?.question,
+                    options: input?.options,
+                    questionNumber: input?.questionNumber,
+                    difficulty: input?.difficulty,
+                    sourcePage: input?.sourcePage,
+                    correctAnswer: input?.correctAnswer,
+                  }}
+                />
               );
             }
 
-            if (type === "tool-askQuizQuestion") {
-              const { toolCallId, state } = part;
-
-              return (
-                <Tool defaultOpen={true} key={toolCallId}>
-                  <ToolHeader state={state} type="tool-askQuizQuestion" />
-                  <ToolContent>
-                    {state === "input-available" && (
-                      <div className="w-fit max-w-2xl rounded-lg border border-gray-200 bg-white p-4">
-                        {/* Question Header - Simple */}
-                        <div className="mb-4">
-                          <div className="mb-4 flex items-center gap-3">
-                            <span className="rounded-full bg-blue-100 px-3 py-1 font-medium text-blue-800 text-sm">
-                              Question{" "}
-                              {(part as any).input?.questionNumber || 1} of{" "}
-                              {(part as any).input?.totalQuestions || 1}
-                            </span>
-                            <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-700 text-sm">
-                              Page {(part as any).input?.sourcePage || 1}
-                            </span>
-                            <span className="rounded-full bg-green-100 px-3 py-1 font-medium text-green-800 text-sm">
-                              {(part as any).input?.difficulty || "easy"}
-                            </span>
-                          </div>
-
-                          <h3 className="mb-4 font-medium text-base text-gray-900 leading-relaxed">
-                            {(part as any).input?.question ||
-                              "Question not available"}
-                          </h3>
-                        </div>
-
-                        {/* Answer Options - Plain Text */}
-                        <div className="space-y-2">
-                          {Object.entries(
-                            (part as any).input?.options || {}
-                          ).map(([key, value]) => (
-                            <label
-                              className="flex cursor-pointer items-start gap-3 rounded px-3 py-2 text-gray-700 transition-colors hover:bg-gray-50"
-                              key={key}
-                            >
-                              <input
-                                className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
-                                name={`question-${(part as any).input?.quizId || "unknown"}`}
-                                type="radio"
-                                value={key}
-                              />
-                              <div className="flex-1">
-                                <span className="font-medium text-sm">
-                                  {key}.
-                                </span>
-                                <span className="ml-2 text-sm">{value}</span>
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {state === "output-available" && (
-                      <ToolOutput
-                        errorText={undefined}
-                        output={
-                          "error" in (part as any).output ? (
-                            <div className="rounded border p-2 text-red-500">
-                              Error: {String((part as any).output.error)}
-                            </div>
-                          ) : (
-                            <div className="text-green-600 text-sm">
-                              ✅ Quiz question answered successfully
-                            </div>
-                          )
-                        }
-                      />
-                    )}
-                  </ToolContent>
-                </Tool>
-              );
-            }
-
-            if (type === "data-quiz-result") {
+            if ((type as any) === "data-quiz-result") {
               console.log("Rendering quiz result:", part);
               const quizResultPart = part as any;
               return (
@@ -414,9 +310,9 @@ const PurePreviewMessage = ({
               );
             }
 
-            if (type === "data-quiz-question") {
+            if ((type as any) === "data-quiz-question") {
               console.log("Rendering quiz question:", part);
-              console.log("Quiz question data:", part.data);
+              console.log("Quiz question data:", (part as any).data);
               const quizQuestionPart = part as any;
               console.log(
                 "Quiz question part after casting:",
@@ -468,7 +364,7 @@ const PurePreviewMessage = ({
             }
 
             // Handle old format quiz-question (fallback)
-            if (type === "quiz-question") {
+            if ((type as any) === "quiz-question") {
               console.log("Rendering old format quiz question:", part);
               const quizQuestionPart = part as any;
               return (
@@ -532,7 +428,7 @@ const PurePreviewMessage = ({
                         output={
                           "error" in part.output ? (
                             <div className="rounded border p-2 text-red-500">
-                              Error: {String(part.output.error)}
+                              Error: {String((part as any).output.error)}
                             </div>
                           ) : (
                             <DocumentToolResult

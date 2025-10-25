@@ -103,11 +103,8 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         </div>
       </div>
 
-      {/* Summary section */}
-      <div className="rounded-lg border bg-muted/20 p-4">
-        <h4 className="mb-2 font-medium text-muted-foreground text-sm">
-          Summary
-        </h4>
+      {/* Summary section - pure conversational text with subtle background */}
+      <div className="rounded-lg bg-gray-50/30 p-4">
         <p className="text-sm leading-relaxed">{summary}</p>
       </div>
 
