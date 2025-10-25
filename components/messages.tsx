@@ -7,7 +7,7 @@ import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
 import { Conversation, ConversationContent } from "./elements/conversation";
-import { Greeting } from "./greeting";
+import { DynamicGreeting } from "./dynamic-greeting";
 import { NotebookCards } from "./notebook-cards";
 import { PreviewMessage, ThinkingMessage } from "./message";
 
@@ -69,7 +69,7 @@ function PureMessages({
         <ConversationContent className="flex flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && (
             <>
-              <Greeting />
+              <DynamicGreeting />
               <div className="mt-8">
                 <NotebookCards />
               </div>
