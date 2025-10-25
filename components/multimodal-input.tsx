@@ -219,7 +219,7 @@ function PureMultimodalInput({
               parts: [
                 {
                   type: "text" as const,
-                  text: `📄 I've processed your PDF: "${firstDoc.title}". ${firstDoc.summary} You can now ask questions about this document.`,
+                  text: `${firstDoc.summary} You can now ask questions about this document.`,
                 },
               ],
               createdAt: new Date(),

@@ -14,8 +14,8 @@ import useSWR, { useSWRConfig } from "swr";
 import { useDebounceCallback, useWindowSize } from "usehooks-ts";
 import { codeArtifact } from "@/artifacts/code/client";
 import { imageArtifact } from "@/artifacts/image/client";
-import { sheetArtifact } from "@/artifacts/sheet/client";
 import { quizArtifact } from "@/artifacts/quiz/client";
+import { sheetArtifact } from "@/artifacts/sheet/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document, Vote } from "@/lib/db/schema";
@@ -94,7 +94,9 @@ function PureArtifact({
     isLoading: isDocumentsFetching,
     mutate: mutateDocuments,
   } = useSWR<Document[]>(
-    artifact.documentId !== "init" && artifact.status !== "streaming"
+    artifact.documentId !== "init" &&
+      artifact.status !== "streaming" &&
+      !artifact.documentId.startsWith("quiz-self-contained-")
       ? `/api/document?id=${artifact.documentId}`
       : null,
     fetcher
