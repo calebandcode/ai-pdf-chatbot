@@ -31,9 +31,9 @@ export function useBubble() {
       height: window.innerHeight,
     };
 
-    // Default bubble dimensions
-    const bubbleWidth = 400;
-    const bubbleHeight = 500;
+    // Default bubble dimensions - make it taller for quiz content
+    const bubbleWidth = 450;
+    const bubbleHeight = Math.min(600, viewport.height - 100); // Max 600px, but leave 100px margin
 
     // Calculate optimal position
     let x = rect.left + rect.width / 2 - bubbleWidth / 2;

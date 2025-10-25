@@ -1,26 +1,21 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  BookOpen,
-  ChevronRight,
-  Copy,
-  HelpCircle,
-  Save,
-  Share,
-} from "lucide-react";
+import { BookOpen, ChevronRight, Copy, HelpCircle, Save } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
   generateSubtopicExplanationAction,
   generateTopicExplanationAction,
 } from "@/app/actions/generate-explanations";
+import { generateUnifiedQuiz } from "@/app/actions/generate-unified-quiz";
 import { startGuidedSession } from "@/app/actions/tutor-session";
 import { Response } from "@/components/elements/response";
+import { Suggestion } from "@/components/elements/suggestion";
 import { FloatingBubble } from "@/components/floating-bubble";
-import { Button } from "@/components/ui/button";
 import { useBubble } from "@/hooks/use-bubble";
 import { sanitizeText } from "@/lib/utils";
+import { SubtopicQuizContext, TopicQuizContext } from "@/lib/types/quiz";
 
 // Loading skeleton component
 const LoadingSkeleton = () => (
@@ -69,7 +64,7 @@ export function TopicOutline({
   const { isOpen, bubbleData, position, bubbleRef, openBubble, closeBubble } =
     useBubble();
 
-  const handleQuizBubble = (
+  const handleQuizBubble = async (
     event: React.MouseEvent,
     topic: string,
     pages: number[]
@@ -77,32 +72,132 @@ export function TopicOutline({
     event.stopPropagation();
     const element = event.currentTarget as HTMLElement;
 
-    openBubble({
-      type: "quiz",
-      title: `Quiz: ${topic}`,
-      content: {
-        questions: [
-          {
-            id: `${topic}-q1`,
-            prompt: `What is the main concept discussed in "${topic}"?`,
-            options: [
-              { id: "A", label: "A", text: "Basic introduction" },
-              { id: "B", label: "B", text: "Advanced techniques" },
-              { id: "C", label: "C", text: "Practical applications" },
-              { id: "D", label: "D", text: "Historical context" },
-            ],
-            correct: "A",
-            explanation:
-              "This topic covers the fundamental concepts and basic introduction.",
-            sourcePage: pages[0] || 1,
-            difficulty: "easy",
-          },
-        ],
-        quizId: `quiz-${topic}-${Date.now()}`,
-        title: `Quiz: ${topic}`,
-      },
-      sourceElement: element,
-    });
+    try {
+      // Generate content if not available
+      let content = topicContent[topic];
+      if (!content) {
+        console.log("🔄 Generating topic content for quiz...");
+        const result = await generateTopicExplanationAction({
+          topicName: topic,
+          description: topics.find(t => t.topic === topic)?.description || "",
+          pages,
+          documentTitle,
+          previousTopics: conversationContext.topicsCovered,
+          currentIndex: conversationContext.currentIndex,
+          totalTopics: topics.length,
+          documentIds,
+        });
+        content = result.explanation;
+        // Update state for future use
+        setTopicContent((prev) => ({
+          ...prev,
+          [topic]: content,
+        }));
+      }
+
+      // Create topic quiz context
+      const context: TopicQuizContext = {
+        scope: "topic",
+        topicName: topic,
+        topicPages: pages,
+        allSubtopics: topics.find(t => t.topic === topic)?.subtopics || [],
+        topicContent: content,
+        rawContent: "", // Will be fetched by the action
+        questionCount: 5,
+        difficulty: "mixed",
+        documentIds,
+        chatId,
+        documentTitle: documentTitle, // Add document title for language context
+      };
+
+      // Generate quiz using unified system
+      const quizResult = await generateUnifiedQuiz(context);
+
+      openBubble({
+        type: "quiz",
+        title: quizResult.title,
+        content: {
+          questions: quizResult.questions,
+          quizId: quizResult.quizId,
+          title: quizResult.title,
+        },
+        sourceElement: element,
+      });
+    } catch (error) {
+      console.error("Error generating quiz:", error);
+      toast.error("Failed to generate quiz. Please try again.");
+    }
+  };
+
+  const handleSubtopicQuizBubble = async (
+    event: React.MouseEvent,
+    subtopic: string,
+    pages: number[],
+    parentTopic: string
+  ) => {
+    event.stopPropagation();
+    const element = event.currentTarget as HTMLElement;
+
+    try {
+      // Generate content if not available
+      let content = subtopicContent[subtopic];
+      if (!content) {
+        console.log("🔄 Generating subtopic content for quiz...");
+        const result = await generateSubtopicExplanationAction({
+          parentTopic,
+          subtopicName: subtopic,
+          pages,
+          documentTitle,
+          previousTopics: conversationContext.topicsCovered,
+          currentIndex: conversationContext.currentIndex,
+          totalTopics: topics.length,
+          documentIds,
+        });
+        content = result.explanation;
+        // Update state for future use
+        setSubtopicContent((prev) => ({
+          ...prev,
+          [subtopic]: content,
+        }));
+      }
+
+      // Create subtopic quiz context
+      const context: SubtopicQuizContext = {
+        scope: "subtopic",
+        subtopicName: subtopic,
+        subtopicPages: pages,
+        parentTopicName: parentTopic,
+        subtopicContent: content,
+        rawContent: "", // Will be fetched by the action
+        questionCount: 3,
+        difficulty: "easy-medium",
+        documentIds,
+        chatId,
+        conversationContext: {
+          topicsCovered: conversationContext.topicsCovered,
+          currentIndex: conversationContext.currentIndex,
+          totalTopics: topics.length,
+        },
+        documentTitle: documentTitle, // Add document title for language context
+      };
+
+      // Generate quiz using unified system
+      const quizResult = await generateUnifiedQuiz(context);
+
+      openBubble({
+        type: "quiz",
+        title: quizResult.title,
+        content: {
+          questions: quizResult.questions,
+          quizId: quizResult.quizId,
+          title: quizResult.title,
+        },
+        sourceElement: element,
+      });
+    } catch (error) {
+      console.error("Error generating subtopic quiz:", error);
+      toast.error("Failed to generate quiz. Please try again.");
+    }
   };
 
   const handleLearnMoreBubble = (
@@ -147,6 +242,15 @@ export function TopicOutline({
       },
       sourceElement: element,
     });
+  };
+
+  const handleCopyTopic = async (_topic: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success("Topic content copied to clipboard!");
+    } catch (_error) {
+      toast.error("Failed to copy content");
+    }
   };
 
   const toggleTopic = async (topicName: string) => {
@@ -206,6 +310,7 @@ export function TopicOutline({
         previousTopics: conversationContext.topicsCovered,
         currentIndex: conversationContext.currentIndex,
         totalTopics: topics.length,
+        documentIds,
       });
 
       setTopicContent((prev) => ({
@@ -277,6 +382,7 @@ export function TopicOutline({
         previousTopics: conversationContext.topicsCovered,
         currentIndex: conversationContext.currentIndex,
         totalTopics: topics.length,
+        documentIds,
       });
 
       setSubtopicContent((prev) => ({
@@ -307,7 +413,7 @@ export function TopicOutline({
     }
   };
 
-  const handleStartGuidedLesson = async (
+  const _handleStartGuidedLesson = async (
     topic: string,
     subtopic?: string,
     pages?: number[]
@@ -342,7 +448,7 @@ export function TopicOutline({
     }
   };
 
-  const handleStartQuiz = async (subtopic: string, _pages: number[]) => {
+  const _handleStartQuiz = async (subtopic: string, _pages: number[]) => {
     const key = `quiz-${subtopic}`;
     setLoadingStates((prev) => new Set(prev).add(key));
 
@@ -393,7 +499,7 @@ export function TopicOutline({
     }
   };
 
-  const shareContent = async (text: string, title: string) => {
+  const _shareContent = async (text: string, title: string) => {
     if (navigator.share) {
       try {
         await navigator.share({
@@ -464,7 +570,7 @@ export function TopicOutline({
                   </button>
                 </div>
 
-                {/* Right side - Action buttons */}
+                {/* Right side - Topic action buttons */}
                 <div className="flex-shrink-0">
                   <div className="flex items-center gap-2">
                     {/* Quiz button */}
@@ -570,132 +676,15 @@ export function TopicOutline({
                       )}
                     </motion.div>
 
-                    {/* Sources Information - Conversational */}
-                    <motion.div
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mb-3"
-                      initial={{ opacity: 0, y: -5 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      <div className="flex items-center gap-2 text-gray-600 text-sm">
-                        <BookOpen className="h-4 w-4" />
-                        <span className="font-medium">Sources:</span>
-                        <span className="text-gray-500">
-                          {topic.pages.length} reference
-                          {topic.pages.length !== 1 ? "s" : ""} •{" "}
-                          {formatPages(topic.pages)}
-                        </span>
-                      </div>
-                    </motion.div>
-
-                    {/* Action Buttons - Conversational Positioning */}
-                    {topicContent[topic.topic] && (
-                      <motion.div
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-center justify-between"
-                        initial={{ opacity: 0, y: -5 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        {/* Learning Actions - Left */}
-                        <div className="flex gap-2">
-                          <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <Button
-                              className="h-8 px-3 py-1 text-xs"
-                              disabled={loadingStates.has(
-                                `guided-${topic.topic}-main`
-                              )}
-                              onClick={() =>
-                                handleStartGuidedLesson(
-                                  topic.topic,
-                                  undefined,
-                                  topic.pages
-                                )
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              {loadingStates.has(`guided-${topic.topic}-main`)
-                                ? "Starting..."
-                                : "Start Guided Lesson"}
-                            </Button>
-                          </motion.div>
-                          <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <Button
-                              className="h-8 px-3 py-1 text-xs"
-                              disabled={loadingStates.has(
-                                `quiz-${topic.topic}`
-                              )}
-                              onClick={() =>
-                                handleStartQuiz(topic.topic, topic.pages)
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              {loadingStates.has(`quiz-${topic.topic}`)
-                                ? "Generating..."
-                                : "Take Quiz"}
-                            </Button>
-                          </motion.div>
-                        </div>
-
-                        {/* Content Actions - Right */}
-                        <div className="flex gap-2">
-                          <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <Button
-                              className="h-7 px-2 py-1 text-xs"
-                              onClick={() =>
-                                copyToClipboard(
-                                  topicContent[topic.topic],
-                                  `${topic.topic} explanation`
-                                )
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              <Copy className="mr-1 h-3 w-3" />
-                              Copy
-                            </Button>
-                          </motion.div>
-                          <motion.div
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
-                            <Button
-                              className="h-7 px-2 py-1 text-xs"
-                              onClick={() =>
-                                shareContent(
-                                  topicContent[topic.topic],
-                                  `${topic.topic} explanation`
-                                )
-                              }
-                              size="sm"
-                              variant="outline"
-                            >
-                              <Share className="mr-1 h-3 w-3" />
-                              Share
-                            </Button>
-                          </motion.div>
-                        </div>
-                      </motion.div>
-                    )}
 
                     {/* Subtopics - Conversational Introduction */}
                     {isExpanded && hasSubtopics && (
-                      <motion.div
-                        animate={{ opacity: 1, y: 0 }}
-                        className="ml-4"
-                        initial={{ opacity: 0, y: -5 }}
-                        transition={{ duration: 0.3 }}
-                      >
+                                  <motion.div
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="ml-4"
+                                    initial={{ opacity: 0, y: -5 }}
+                                    transition={{ duration: 0.3 }}
+                                  >
                         <p className="mb-4 font-medium text-gray-600 text-sm">
                           Let's break this down further:
                         </p>
@@ -703,6 +692,7 @@ export function TopicOutline({
                           <motion.div
                             animate={{ opacity: 1, y: 0 }}
                             className="mb-4"
+                            data-subtopic={subtopic.subtopic}
                             initial={{ opacity: 0, y: -5 }}
                             key={`subtopic-${subtopic.subtopic}-${subIndex}`}
                             transition={{ duration: 0.3 }}
@@ -849,93 +839,37 @@ export function TopicOutline({
 
                                   {/* Action Buttons - Natural Positioning */}
                                   {subtopicContent[subtopic.subtopic] && (
-                                    <motion.div
-                                      animate={{ opacity: 1, y: 0 }}
-                                      className="flex items-center justify-between"
-                                      initial={{ opacity: 0, y: -5 }}
-                                      transition={{ duration: 0.3 }}
-                                    >
-                                      {/* Learning Actions - Left */}
+                                    <div className="flex items-center justify-between">
+                                      {/* Left side - empty for now */}
                                       <div className="flex gap-2">
-                                        <Button
-                                          className="h-7 px-2 py-1 text-xs"
-                                          disabled={loadingStates.has(
-                                            `guided-${topic.topic}-${subtopic.subtopic}`
-                                          )}
-                                          onClick={() =>
-                                            handleStartGuidedLesson(
-                                              topic.topic,
-                                              subtopic.subtopic,
-                                              subtopic.pages
-                                            )
-                                          }
-                                          size="sm"
-                                          variant="outline"
-                                        >
-                                          {loadingStates.has(
-                                            `guided-${topic.topic}-${subtopic.subtopic}`
-                                          )
-                                            ? "Starting..."
-                                            : "Start Guided Lesson"}
-                                        </Button>
-                                        <Button
-                                          className="h-7 px-2 py-1 text-xs"
-                                          disabled={loadingStates.has(
-                                            `quiz-${subtopic.subtopic}`
-                                          )}
-                                          onClick={() =>
-                                            handleStartQuiz(
-                                              subtopic.subtopic,
-                                              subtopic.pages
-                                            )
-                                          }
-                                          size="sm"
-                                          variant="outline"
-                                        >
-                                          {loadingStates.has(
-                                            `quiz-${subtopic.subtopic}`
-                                          )
-                                            ? "Generating..."
-                                            : "Take Quiz"}
-                                        </Button>
+                                        {/* No left actions for subtopics */}
                                       </div>
-
-                                      {/* Content Actions - Right */}
-                                      <div className="flex gap-1">
-                                        <Button
-                                          className="h-6 px-2 py-1 text-xs"
-                                          onClick={() =>
-                                            copyToClipboard(
-                                              subtopicContent[
-                                                subtopic.subtopic
-                                              ],
-                                              `${subtopic.subtopic} explanation`
-                                            )
-                                          }
-                                          size="sm"
-                                          variant="outline"
+                                      
+                                      {/* Right side - Quiz */}
+                                      <div className="flex gap-2">
+                                        <Suggestion
+                                          className="h-auto whitespace-normal p-3 text-left"
+                                          onClick={() => {
+                                            // Create a mock event for positioning
+                                            const mockEvent = {
+                                              currentTarget: document.querySelector(`[data-subtopic="${subtopic.subtopic}"]`) as HTMLElement || document.body,
+                                              stopPropagation: () => {}
+                                            } as unknown as React.MouseEvent;
+                                            
+                                            handleSubtopicQuizBubble(
+                                              mockEvent,
+                                              subtopic.subtopic,
+                                              subtopic.pages,
+                                              topic.topic
+                                            );
+                                          }}
+                                          suggestion="Test Understanding"
                                         >
-                                          <Copy className="mr-1 h-3 w-3" />
-                                          Copy
-                                        </Button>
-                                        <Button
-                                          className="h-6 px-2 py-1 text-xs"
-                                          onClick={() =>
-                                            shareContent(
-                                              subtopicContent[
-                                                subtopic.subtopic
-                                              ],
-                                              `${subtopic.subtopic} explanation`
-                                            )
-                                          }
-                                          size="sm"
-                                          variant="outline"
-                                        >
-                                          <Share className="mr-1 h-3 w-3" />
-                                          Share
-                                        </Button>
+                                          <HelpCircle className="mr-2 h-4 w-4" />
+                                          Test Understanding
+                                        </Suggestion>
                                       </div>
-                                    </motion.div>
+                                    </div>
                                   )}
                                 </motion.div>
                               )}

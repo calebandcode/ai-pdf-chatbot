@@ -2,16 +2,7 @@
 
 import { CheckCircle, RotateCcw, XCircle } from "lucide-react";
 import { useState } from "react";
-
-type QuizQuestion = {
-  id: string;
-  prompt: string;
-  options: Array<{ id: string; label: string; text: string }>;
-  correct: string;
-  explanation: string;
-  sourcePage: number;
-  difficulty: string;
-};
+import { QuizQuestion } from "@/lib/types/quiz";
 
 type QuizBubbleProps = {
   data: {
@@ -63,8 +54,8 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
 
   if (showResults) {
     return (
-      <div className="space-y-4">
-        <div className="text-center">
+      <div className="space-y-4 max-h-full flex flex-col">
+        <div className="text-center flex-shrink-0">
           <div className="mb-4">
             <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
               <span className="font-bold text-2xl text-blue-600">
@@ -80,7 +71,7 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="flex-1 overflow-y-auto space-y-3">
           {data.questions.map((question, index) => {
             const userAnswer = selectedAnswers[question.id];
             const isCorrect = userAnswer === question.correct;
@@ -104,9 +95,9 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
                     Question {index + 1}
                   </span>
                 </div>
-                <p className="text-gray-700 text-sm">{question.prompt}</p>
+                <p className="text-gray-700 text-sm leading-relaxed">{question.prompt}</p>
                 {question.explanation && (
-                  <p className="mt-2 text-gray-600 text-xs">
+                  <p className="mt-2 text-gray-600 text-xs leading-relaxed">
                     {question.explanation}
                   </p>
                 )}
@@ -115,7 +106,7 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
           })}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0 pt-2 border-t border-gray-100">
           <button
             className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200"
             onClick={handleRestart}
@@ -137,9 +128,9 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-h-full flex flex-col">
       {/* Progress indicator */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-shrink-0">
         <span className="text-gray-600 text-sm">
           Question {currentQuestionIndex + 1} of {data.questions.length}
         </span>
@@ -155,52 +146,56 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
         </div>
       </div>
 
-      {/* Question */}
-      <div>
-        <h4 className="mb-3 font-medium text-gray-800">
-          {currentQuestion.prompt}
-        </h4>
+      {/* Question - scrollable area */}
+      <div className="flex-1 overflow-y-auto space-y-4">
+        {/* Question */}
+        <div>
+          <h4 className="mb-3 font-medium text-gray-800 text-sm leading-relaxed">
+            {currentQuestion.prompt}
+          </h4>
 
-        {/* Answer options */}
-        <div className="space-y-2">
-          {currentQuestion.options.map((option) => {
-            const isSelected =
-              selectedAnswers[currentQuestion.id] === option.id;
+          {/* Answer options */}
+          <div className="space-y-2">
+            {Object.entries(currentQuestion.options).map(([key, value]) => {
+              const isSelected = selectedAnswers[currentQuestion.id] === key;
 
-            return (
-              <button
-                className={`w-full rounded-lg border p-3 text-left transition-all ${
-                  isSelected
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
-                }`}
-                key={option.id}
-                onClick={() => handleAnswerSelect(option.id)}
-                type="button"
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${
-                      isSelected
-                        ? "border-blue-500 bg-blue-500"
-                        : "border-gray-300"
-                    }`}
-                  >
-                    {isSelected && (
-                      <div className="h-2 w-2 rounded-full bg-white" />
-                    )}
+              return (
+                <button
+                  className={`w-full rounded-lg border p-3 text-left transition-all ${
+                    isSelected
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                  }`}
+                  key={key}
+                  onClick={() => handleAnswerSelect(key)}
+                  type="button"
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`flex h-5 w-5 items-center justify-center rounded-full border-2 flex-shrink-0 mt-0.5 ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-500"
+                          : "border-gray-300"
+                      }`}
+                    >
+                      {isSelected && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium">{key}.</span>
+                      <span className="ml-1 break-words">{value}</span>
+                    </div>
                   </div>
-                  <span className="font-medium">{option.label}.</span>
-                  <span>{option.text}</span>
-                </div>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <div className="flex gap-2">
+      {/* Navigation - fixed at bottom */}
+      <div className="flex gap-2 flex-shrink-0 pt-2 border-t border-gray-100">
         <button
           className="flex-1 rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-200"
           onClick={onClose}
