@@ -1,16 +1,16 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
+import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { useMessages } from "@/hooks/use-messages";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { useDataStream } from "./data-stream-provider";
-import { Conversation, ConversationContent } from "./elements/conversation";
 import { DynamicGreeting } from "./dynamic-greeting";
-import { NotebookCards } from "./notebook-cards";
+import { Conversation, ConversationContent } from "./elements/conversation";
 import { PreviewMessage, ThinkingMessage } from "./message";
+import { NotebookCards } from "./notebook-cards";
 
 type MessagesProps = {
   chatId: string;
@@ -62,18 +62,19 @@ function PureMessages({
 
   return (
     <div
-      className="overscroll-behavior-contain -webkit-overflow-scrolling-touch flex-1 touch-pan-y overflow-y-scroll scroll-smooth relative"
+      className="overscroll-behavior-contain -webkit-overflow-scrolling-touch relative flex-1 touch-pan-y overflow-y-scroll scroll-smooth"
       ref={messagesContainerRef}
-      style={{ 
+      style={{
         overflowAnchor: "none",
         scrollBehavior: "smooth",
         scrollPaddingTop: "1rem",
-        scrollPaddingBottom: "1rem"
+        scrollPaddingBottom: "1rem",
       }}
     >
-      {/* Fade Edges */}
-      <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent z-10" />
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent z-10" />
+      {/* Bottom Fade Edge - Only show on chat page (when there are messages) */}
+      {messages.length > 0 && (
+        <div className="pointer-events-none fixed right-0 bottom-0 left-0 z-20 h-8 bg-gradient-to-t from-background to-transparent" />
+      )}
       <Conversation className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 md:gap-6">
         <ConversationContent className="flex flex-col gap-4 px-2 py-4 md:gap-6 md:px-4">
           {messages.length === 0 && (
@@ -122,14 +123,14 @@ function PureMessages({
       <AnimatePresence>
         {!isAtBottom && (
           <motion.button
+            animate={{ opacity: 1, scale: 1 }}
             aria-label="Scroll to bottom"
             className="-translate-x-1/2 fixed bottom-44 left-1/2 z-20 rounded-full border bg-background p-2 shadow-lg transition-colors hover:bg-muted"
-            onClick={() => scrollToBottom("smooth")}
-            type="button"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0, scale: 0.8 }}
+            onClick={() => scrollToBottom("smooth")}
             transition={{ duration: 0.2, ease: "easeOut" }}
+            type="button"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
           >

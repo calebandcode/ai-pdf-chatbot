@@ -4,6 +4,7 @@ import type { UseChatHelpers } from "@ai-sdk/react";
 import { Trigger } from "@radix-ui/react-select";
 import type { UIMessage } from "ai";
 import equal from "fast-deep-equal";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type Dispatch,
@@ -17,18 +18,18 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { generateQuiz } from "@/app/actions/generate-quiz";
-import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
 import { processAndCreateNotebook } from "@/app/actions/process-and-create-notebook";
+import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
 import { SelectItem } from "@/components/ui/select";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage, QuizOfferPayload } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { cn, generateUUID } from "@/lib/utils";
+import { type ContentType, ContentTypeMenu } from "./content-type-menu";
 import { Context } from "./elements/context";
 import {
   PromptInput,
@@ -46,7 +47,6 @@ import {
   PaperclipIcon,
   StopIcon,
 } from "./icons";
-import { ContentTypeMenu, type ContentType } from "./content-type-menu";
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
@@ -90,7 +90,7 @@ function PureMultimodalInput({
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
-  
+
   // Content type state management
   const [contentType, setContentType] = useState<ContentType>("pdf");
   const [showAutoDetected, setShowAutoDetected] = useState(false);
@@ -137,74 +137,80 @@ function PureMultimodalInput({
   const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     setInput(value);
-    
+
     // Enhanced auto-detection logic
     if (value.trim()) {
       const trimmedValue = value.trim().toLowerCase();
-      
+
       // YouTube detection (more comprehensive)
-      if (trimmedValue.includes('youtube.com') || 
-          trimmedValue.includes('youtu.be') || 
-          trimmedValue.includes('m.youtube.com') ||
-          trimmedValue.match(/youtube\.com\/watch\?v=/)) {
-        setContentType('youtube');
+      if (
+        trimmedValue.includes("youtube.com") ||
+        trimmedValue.includes("youtu.be") ||
+        trimmedValue.includes("m.youtube.com") ||
+        trimmedValue.match(/youtube\.com\/watch\?v=/)
+      ) {
+        setContentType("youtube");
         setShowAutoDetected(true);
         setTimeout(() => setShowAutoDetected(false), 2000);
       }
       // Other video platforms
-      else if (trimmedValue.includes('vimeo.com') || 
-               trimmedValue.includes('dailymotion.com') ||
-               trimmedValue.includes('twitch.tv')) {
-        setContentType('link'); // Treat as regular link for now
+      else if (
+        trimmedValue.includes("vimeo.com") ||
+        trimmedValue.includes("dailymotion.com") ||
+        trimmedValue.includes("twitch.tv")
+      ) {
+        setContentType("link"); // Treat as regular link for now
         setShowAutoDetected(true);
         setTimeout(() => setShowAutoDetected(false), 2000);
       }
       // Website/URL detection (more comprehensive)
       else if (trimmedValue.match(/^https?:\/\/.+/)) {
-        setContentType('link');
+        setContentType("link");
         setShowAutoDetected(true);
         setTimeout(() => setShowAutoDetected(false), 2000);
       }
       // Text content detection (improved logic)
-      else if (value.length > 50 && 
-               !trimmedValue.includes('http') && 
-               !trimmedValue.includes('www.') &&
-               trimmedValue.split(' ').length > 5) {
-        setContentType('text');
+      else if (
+        value.length > 50 &&
+        !trimmedValue.includes("http") &&
+        !trimmedValue.includes("www.") &&
+        trimmedValue.split(" ").length > 5
+      ) {
+        setContentType("text");
         setShowAutoDetected(true);
         setTimeout(() => setShowAutoDetected(false), 2000);
       }
       // Reset to PDF for short text or unclear content
       else if (value.length < 20) {
-        setContentType('pdf');
+        setContentType("pdf");
       }
     } else {
       // Reset to PDF when input is empty
-      setContentType('pdf');
+      setContentType("pdf");
     }
   };
 
   const handleContentTypeSelect = (type: ContentType) => {
     setContentType(type);
     // Reset input when switching to PDF mode
-    if (type === 'pdf') {
-      setInput('');
+    if (type === "pdf") {
+      setInput("");
     }
   };
 
   // Dynamic placeholder based on content type
   const getPlaceholder = () => {
     switch (contentType) {
-      case 'pdf':
-        return 'Upload PDF or drag & drop to start learning...';
-      case 'link':
-        return 'Paste a webpage URL to analyze...';
-      case 'youtube':
-        return 'Paste a YouTube URL to get transcript...';
-      case 'text':
-        return 'Enter your text to analyze...';
+      case "pdf":
+        return "Upload PDF or drag & drop to start learning...";
+      case "link":
+        return "Paste a webpage URL to analyze...";
+      case "youtube":
+        return "Paste a YouTube URL to get transcript...";
+      case "text":
+        return "Enter your text to analyze...";
       default:
-        return 'Send a message or drag & drop a PDF to start learning...';
+        return "Send a message or drag & drop a PDF to start learning...";
     }
   };
 
@@ -377,7 +383,7 @@ function PureMultimodalInput({
     if (contentType !== "pdf" && trimmedInput) {
       try {
         setIsProcessingAttachments(true);
-        
+
         const result = await processAndCreateNotebook({
           contentType,
           content: trimmedInput,
@@ -387,17 +393,23 @@ function PureMultimodalInput({
         if (result.success && result.data) {
           // Redirect to the new chat page (like PDF processing does)
           const { documentId, chatId, title, summary } = result.data;
-          
+
           // Clear the input
           setInput("");
           setLocalStorageInput("");
           resetHeight();
-          
+
           // Show success message
-          toast.success(`${contentType === 'youtube' ? 'YouTube video' : 
-                        contentType === 'link' ? 'Website content' : 
-                        'Text content'} processed successfully!`);
-          
+          toast.success(
+            `${
+              contentType === "youtube"
+                ? "YouTube video"
+                : contentType === "link"
+                  ? "Website content"
+                  : "Text content"
+            } processed successfully!`
+          );
+
           // Redirect to the chat page (same pattern as PDF)
           setTimeout(() => {
             router.push(
@@ -410,9 +422,13 @@ function PureMultimodalInput({
       } catch (error) {
         console.error("Failed to process content", error);
         toast.error(
-          `We couldn't process your ${contentType === 'youtube' ? 'YouTube video' : 
-                                    contentType === 'link' ? 'website link' : 
-                                    'text content'}. Please try again shortly.`
+          `We couldn't process your ${
+            contentType === "youtube"
+              ? "YouTube video"
+              : contentType === "link"
+                ? "website link"
+                : "text content"
+          }. Please try again shortly.`
         );
       } finally {
         setIsProcessingAttachments(false);
@@ -577,19 +593,19 @@ function PureMultimodalInput({
 
         try {
           const uploadPromises = imageFiles.map((file) => uploadFile(file));
-        const uploadedAttachments = await Promise.all(uploadPromises);
-        const successfullyUploadedAttachments = uploadedAttachments.filter(
-          (attachment) => attachment !== undefined
-        );
+          const uploadedAttachments = await Promise.all(uploadPromises);
+          const successfullyUploadedAttachments = uploadedAttachments.filter(
+            (attachment) => attachment !== undefined
+          );
 
-        setAttachments((currentAttachments) => [
-          ...currentAttachments,
-          ...successfullyUploadedAttachments,
-        ]);
-      } catch (error) {
-        console.error("Error uploading files!", error);
-      } finally {
-        setUploadQueue([]);
+          setAttachments((currentAttachments) => [
+            ...currentAttachments,
+            ...successfullyUploadedAttachments,
+          ]);
+        } catch (error) {
+          console.error("Error uploading files!", error);
+        } finally {
+          setUploadQueue([]);
         }
       }
     },
@@ -640,14 +656,13 @@ function PureMultimodalInput({
     <div className={cn("relative flex w-full flex-col gap-4", className)}>
       {messages.length === 0 &&
         attachments.length === 0 &&
-        uploadQueue.length === 0 && (
-          // <SuggestedActions
-          //   chatId={chatId}
-          //   selectedVisibilityType={selectedVisibilityType}
-          //   sendMessage={sendMessage}
-          // />
-          null
-        )}
+        uploadQueue.length === 0 &&
+        // <SuggestedActions
+        //   chatId={chatId}
+        //   selectedVisibilityType={selectedVisibilityType}
+        //   sendMessage={sendMessage}
+        // />
+        null}
 
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-blue-500 border-dashed bg-blue-50/80 dark:bg-blue-950/80">
@@ -660,7 +675,7 @@ function PureMultimodalInput({
             </p>
           </div>
         </div>
-        )}
+      )}
 
       <input
         accept=".pdf"
@@ -738,16 +753,21 @@ function PureMultimodalInput({
         <PromptInputToolbar className="!border-top-0 border-t-0! p-0 shadow-none dark:border-0 dark:border-transparent!">
           <PromptInputTools className="gap-0 sm:gap-0.5">
             <ContentTypeMenu
-              onContentTypeSelect={handleContentTypeSelect}
               disabled={status !== "ready"}
               fileInputRef={fileInputRef}
+              onContentTypeSelect={handleContentTypeSelect}
             />
             {showAutoDetected && (
-              <div className="flex items-center gap-1 rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500"></span>
-                Auto-detected: {contentType === 'youtube' ? 'YouTube Video' : 
-                               contentType === 'link' ? 'Website Link' : 
-                               contentType === 'text' ? 'Plain Text' : 'PDF'}
+              <div className="flex items-center gap-1 rounded-md bg-green-50 px-2 py-1 text-green-700 text-xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                Auto-detected:{" "}
+                {contentType === "youtube"
+                  ? "YouTube Video"
+                  : contentType === "link"
+                    ? "Website Link"
+                    : contentType === "text"
+                      ? "Plain Text"
+                      : "PDF"}
               </div>
             )}
             <AttachmentsButton
@@ -817,18 +837,19 @@ function PureAttachmentsButton({
   const isReasoningModel = selectedModelId === "chat-model-reasoning";
 
   return (
-    <Button
-      className="aspect-square h-8 rounded-lg p-1 transition-colors hover:bg-accent"
-      data-testid="attachments-button"
-      disabled={status !== "ready" || isReasoningModel}
-      onClick={(event) => {
-        event.preventDefault();
-        fileInputRef.current?.click();
-      }}
-      variant="ghost"
-    >
-      <PaperclipIcon size={14} style={{ width: 14, height: 14 }} />
-    </Button>
+    // <Button
+    //   className="aspect-square h-8 rounded-lg p-1 transition-colors hover:bg-accent"
+    //   data-testid="attachments-button"
+    //   disabled={status !== "ready" || isReasoningModel}
+    //   onClick={(event) => {
+    //     event.preventDefault();
+    //     fileInputRef.current?.click();
+    //   }}
+    //   variant="ghost"
+    // >
+    //   {/* <PaperclipIcon size={14} style={{ width: 14, height: 14 }} /> */}
+    // </Button>
+    <></>
   );
 }
 

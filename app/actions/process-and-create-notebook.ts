@@ -143,29 +143,19 @@ export async function processAndCreateNotebook(
 
     // Create a chat entry (similar to PDF processing)
     const chatId = generateUUID();
-    const initialMessage = {
-      id: generateUUID(),
-      chatId,
-      role: "user" as const,
-      parts: [
-        {
-          type: "text" as const,
-          text: `${
-            contentType === "text"
-              ? "Text content"
-              : contentType === "link"
-                ? "Website link"
-                : "YouTube video"
-          } shared: ${processedContent.title}`,
-        },
-      ],
-      attachments: [],
-      createdAt: new Date(),
-    };
 
-    // Generate a title for the chat
+    // Generate a title for the chat based on the content
     const chatTitle = await generateTitleFromUserMessage({
-      message: initialMessage,
+      message: {
+        id: generateUUID(),
+        role: "user" as const,
+        parts: [
+          {
+            type: "text" as const,
+            text: processedContent.title,
+          },
+        ],
+      },
     });
 
     // Save the chat to database
@@ -174,11 +164,6 @@ export async function processAndCreateNotebook(
       userId: session.user.id,
       title: chatTitle,
       visibility: "private",
-    });
-
-    // Save the initial message
-    await saveMessages({
-      messages: [initialMessage],
     });
 
     console.log("📝 Created chat:", chatId, "with title:", chatTitle);
