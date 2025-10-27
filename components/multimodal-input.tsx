@@ -17,11 +17,12 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
 import { generateQuiz } from "@/app/actions/generate-quiz";
 import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
-import { processContent, createChatWithContent } from "@/app/actions/process-content";
+import { processAndCreateNotebook } from "@/app/actions/process-and-create-notebook";
 import { SelectItem } from "@/components/ui/select";
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
@@ -86,6 +87,7 @@ function PureMultimodalInput({
   usage?: AppUsage;
   onDocumentUploaded?: () => void;
 }) {
+  const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
   
@@ -371,63 +373,37 @@ function PureMultimodalInput({
       return;
     }
 
-    // Handle different content types (non-PDF)
+    // Handle different content types (non-PDF) - Create notebooks like PDFs
     if (contentType !== "pdf" && trimmedInput) {
       try {
         setIsProcessingAttachments(true);
         
-        const result = await processContent({
+        const result = await processAndCreateNotebook({
           contentType,
           content: trimmedInput,
           title: undefined, // Let the system generate a title
         });
 
         if (result.success && result.data) {
-          // Create a chat with the processed content
-          const chatResult = await createChatWithContent(result.data);
+          // Redirect to the new chat page (like PDF processing does)
+          const { documentId, chatId, title, summary } = result.data;
           
-          if (chatResult.success && chatResult.data) {
-            // Add messages to show the processed content
-            setMessages([
-              {
-                id: generateUUID(),
-                role: "user",
-                parts: [
-                  {
-                    type: "text",
-                    text: `I've shared ${contentType === 'youtube' ? 'a YouTube video' : 
-                                    contentType === 'link' ? 'a website link' : 
-                                    'some text'} for analysis.`,
-                  },
-                ],
-              },
-              {
-                id: generateUUID(),
-                role: "assistant",
-                parts: [
-                  {
-                    type: "text",
-                    text: `I've processed your ${contentType === 'youtube' ? 'YouTube video' : 
-                                          contentType === 'link' ? 'website content' : 
-                                          'text content'}. Here's what I found:\n\n**${result.data.title}**\n\n${result.data.content.substring(0, 500)}${result.data.content.length > 500 ? '...' : ''}`,
-                  },
-                ],
-              },
-            ]);
-
-            setInput("");
-            setLocalStorageInput("");
-            resetHeight();
-            if (width && width > 768) {
-              textareaRef.current?.focus();
-            }
-
-            toast.success(`${contentType === 'youtube' ? 'YouTube video' : 
-                          contentType === 'link' ? 'Website content' : 
-                          'Text content'} processed successfully!`);
-          } else {
-            throw new Error(chatResult.error || "Failed to create chat");
-          }
+          // Clear the input
+          setInput("");
+          setLocalStorageInput("");
+          resetHeight();
+          
+          // Show success message
+          toast.success(`${contentType === 'youtube' ? 'YouTube video' : 
+                        contentType === 'link' ? 'Website content' : 
+                        'Text content'} processed successfully!`);
+          
+          // Redirect to the chat page (same pattern as PDF)
+          setTimeout(() => {
+            router.push(
+              `/chat/${chatId}?doc=${documentId}&summary=${encodeURIComponent(summary)}`
+            );
+          }, 1000);
         } else {
           throw new Error(result.error || "Failed to process content");
         }
