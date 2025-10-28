@@ -1,10 +1,11 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageCircle, Send, Sparkles, X } from "lucide-react";
+import { Bookmark, MessageCircle, Send, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-// Removed unused Button import
+import { Button } from "@/components/ui/button";
+import { useTips } from "@/hooks/use-tips";
 
 export type SelectionContext = {
   selectedText: string;
@@ -38,7 +39,21 @@ export function ContextualChatModal({
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { addTip } = useTips();
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const handleSaveResponse = (responseText: string) => {
+    if (!context) {
+      return;
+    }
+
+    addTip(
+      responseText,
+      `${context.sourceType}: ${context.sourceTitle}`,
+      `AI response about: "${context.selectedText.slice(0, 50)}${context.selectedText.length > 50 ? "..." : ""}"`
+    );
+    toast.success("Response saved to your tips!");
+  };
 
   // Calculate optimal position beside the selected text
   useEffect(() => {
@@ -51,16 +66,16 @@ export function ContextualChatModal({
 
         // Position to the right of selection, or left if not enough space
         const spaceOnRight = window.innerWidth - rect.right;
-        const panelWidth = 320; // Approximate panel width
+        const panelWidth = 500; // Updated to match actual panel width
 
-        let x = rect.right + 16; // 16px gap from selection
-        if (spaceOnRight < panelWidth + 32) {
-          x = rect.left - panelWidth - 16; // Position to the left instead
+        let x = rect.right + 12; // Reduced gap from selection
+        if (spaceOnRight < panelWidth + 24) {
+          x = rect.left - panelWidth - 12; // Position to the left instead
         }
 
-        // Vertically center with the selection, but keep within viewport
-        let y = rect.top + rect.height / 2 - 200; // Approximate half panel height
-        y = Math.max(16, Math.min(y, window.innerHeight - 400 - 16));
+        // Better vertical positioning - align with selection top
+        let y = rect.top - 10; // Small offset above selection
+        y = Math.max(10, Math.min(y, window.innerHeight - 500 - 10));
 
         setPosition({ x, y });
       }
@@ -74,12 +89,77 @@ export function ContextualChatModal({
     }
   }, [messages.length]);
 
-  // Focus input when modal opens
+  // Focus input and clear messages when modal opens (new selection)
   useEffect(() => {
     if (isOpen) {
+      // Clear any previous messages for clean slate
+      setMessages([]);
+      setInputValue("");
+      setIsLoading(false);
+
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
+
+  const handleQuickAction = async (action: string) => {
+    if (!context || isLoading) {
+      return;
+    }
+
+    let prompt = "";
+    switch (action) {
+      case "explain":
+        prompt = `Explain this text in simple terms: "${context.selectedText}"`;
+        break;
+      case "simplify":
+        prompt = `Simplify this text for easier understanding: "${context.selectedText}"`;
+        break;
+      case "quiz":
+        prompt = `Create a quick quiz question about: "${context.selectedText}"`;
+        break;
+      case "examples":
+        prompt = `Give practical examples related to: "${context.selectedText}"`;
+        break;
+      default:
+        return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/contextual-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: prompt,
+          context,
+          conversationHistory: [],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to get AI response");
+      }
+
+      const result = await response.json();
+
+      const aiMessage: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: result.response,
+        timestamp: new Date(),
+      };
+
+      setMessages([aiMessage]); // Replace any previous message
+    } catch (error) {
+      console.error("Error in contextual chat:", error);
+      toast.error("Failed to get AI response");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !context || isLoading) {
@@ -123,7 +203,7 @@ export function ContextualChatModal({
         timestamp: new Date(),
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      setMessages([assistantMessage]); // Replace any previous message
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error("Failed to get response. Please try again.");
@@ -139,171 +219,165 @@ export function ContextualChatModal({
     }
   };
 
-  const getSourceTypeIcon = (type: string) => {
-    switch (type) {
-      case "pdf":
-        return "📄";
-      case "website":
-        return "🌐";
-      case "text":
-        return "📝";
-      default:
-        return "📄";
-    }
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
-
   if (!isOpen || !context) {
     return null;
   }
 
   return (
     <AnimatePresence>
-      {/* Minimal Tooltip Panel - No overlay, positioned beside selection */}
+      {/* Click outside overlay to close */}
+      <motion.div
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-40"
+        exit={{ opacity: 0 }}
+        initial={{ opacity: 0 }}
+        key="contextual-chat-overlay"
+        onClick={onClose}
+      />
+
+      {/* Main Panel - Response and Input together */}
       <motion.div
         animate={{ opacity: 1, scale: 1 }}
-        className="fixed z-50 w-80 rounded-sm border border-gray-100 bg-white shadow-lg transition-all duration-200 hover:border-gray-200"
+        className="fixed z-50 w-[500px] rounded-lg border border-gray-200 bg-white shadow-xl"
         exit={{ opacity: 0, scale: 0.95 }}
         initial={{ opacity: 0, scale: 0.95 }}
+        key="contextual-chat-main-panel"
         onClick={(e) => e.stopPropagation()}
         ref={panelRef}
         style={{
           left: position.x,
           top: position.y,
-          maxHeight: "400px",
+          maxHeight: "600px",
         }}
         transition={{ duration: 0.2 }}
       >
-        {/* Header - Notebook card style */}
-        <div className="flex items-start justify-between p-4 pb-3">
-          <div className="flex items-center gap-2">
-            <div className="rounded-sm bg-gray-50 p-1">
-              <MessageCircle className="h-3 w-3 text-gray-600" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-normal text-gray-900 text-sm">
-                Ask about this
-              </h3>
-              <div className="flex items-center gap-1 text-gray-400 text-xs">
-                <span>{getSourceTypeIcon(context.sourceType)}</span>
-                <span className="truncate">{context.sourceTitle}</span>
-              </div>
+        {/* AI Response Area - ABOVE input like Notion */}
+        {(messages.length > 0 || isLoading) && (
+          <div className="border-gray-200 border-b p-4">
+            <div className="max-h-80 overflow-y-auto">
+              {isLoading ? (
+                <div className="flex items-center gap-2 text-gray-500">
+                  <div className="flex space-x-1">
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.3s]" />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-blue-500 [animation-delay:-0.15s]" />
+                    <div className="h-2 w-2 animate-bounce rounded-full bg-blue-500" />
+                  </div>
+                  <span className="text-sm">AI is thinking...</span>
+                </div>
+              ) : (
+                messages.length > 0 && (
+                  <div className="group relative">
+                    <div className="whitespace-pre-wrap text-gray-800 text-sm leading-relaxed">
+                      {messages.at(-1)?.content}
+                    </div>
+                    {/* Save Button - appears on hover like copy button in main chat */}
+                    <div className="-right-1 absolute top-0 opacity-0 transition-opacity group-hover:opacity-100">
+                      <Button
+                        className="size-8 p-1.5 text-muted-foreground hover:text-foreground"
+                        onClick={() =>
+                          handleSaveResponse(messages.at(-1)?.content || "")
+                        }
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Bookmark size={14} />
+                        <span className="sr-only">Save to tips</span>
+                      </Button>
+                    </div>
+                  </div>
+                )
+              )}
             </div>
           </div>
-          <button
-            className="rounded-sm p-1 text-gray-400 hover:text-gray-600"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </div>
+        )}
 
-        {/* Selected Text Quote - Subtle style */}
-        <div className="mx-4 mb-3 rounded-sm border-gray-200 border-l-2 bg-gray-50 px-3 py-2">
-          <p className="text-gray-600 text-xs italic leading-relaxed">
-            "
-            {context.selectedText.length > 100
-              ? `${context.selectedText.slice(0, 100)}...`
-              : context.selectedText}
-            "
-          </p>
-        </div>
-
-        {/* Messages Area - Compact */}
-        <div className="max-h-48 overflow-y-auto px-4">
-          {messages.length === 0 ? (
-            <div className="py-4 text-center">
-              <div className="mb-2 flex justify-center">
-                <div className="rounded-full bg-gray-100 p-2">
-                  <Sparkles className="h-4 w-4 text-gray-500" />
-                </div>
-              </div>
-              <p className="text-gray-500 text-xs">
-                Ask me anything about this text
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2 pb-2">
-              {messages.map((message) => (
-                <div
-                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                  key={message.id}
-                >
-                  <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
-                      message.role === "user"
-                        ? "bg-gray-900 text-white"
-                        : "bg-gray-100 text-gray-800"
-                    }`}
-                  >
-                    <p className="leading-relaxed">{message.content}</p>
-                    <div
-                      className={`mt-1 text-xs ${
-                        message.role === "user"
-                          ? "text-gray-300"
-                          : "text-gray-500"
-                      }`}
-                    >
-                      {formatTime(message.timestamp)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Typing Indicator - Minimal */}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="rounded-lg bg-gray-100 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="flex space-x-1">
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
-                      </div>
-                      <span className="text-gray-500 text-xs">
-                        AI thinking...
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Area - Compact */}
-        <div className="border-gray-100 border-t p-3">
-          <div className="flex items-center gap-2">
+        {/* Input Area - Shorter height, maximum width like Notion */}
+        <div className="px-3 py-3">
+          <div className="flex items-center gap-1">
             <input
-              className="flex-1 rounded-sm border border-gray-200 bg-white px-3 py-2 text-xs focus:border-gray-300 focus:outline-none"
+              className="flex-1 border-0 bg-transparent px-1 py-1 text-gray-900 text-sm placeholder-gray-400 focus:outline-none"
               disabled={isLoading}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Ask about this text..."
+              placeholder="Ask AI anything..."
               ref={inputRef}
               value={inputValue}
             />
-            <button
-              className={`rounded-sm p-2 text-xs transition-colors ${
-                inputValue.trim() && !isLoading
-                  ? "bg-gray-900 text-white hover:bg-gray-800"
-                  : "bg-gray-100 text-gray-400"
-              }`}
-              disabled={!inputValue.trim() || isLoading}
-              onClick={handleSendMessage}
-              type="button"
-            >
-              <Send className="h-3 w-3" />
-            </button>
+            {inputValue.trim() && (
+              <button
+                className="rounded-md bg-blue-600 p-1.5 text-white hover:bg-blue-700"
+                disabled={isLoading}
+                onClick={handleSendMessage}
+                type="button"
+              >
+                <Send className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       </motion.div>
+
+      {/* Separate Suggestions Panel - Narrower like Notion dropdown */}
+      {!messages.length && !isLoading && (
+        <motion.div
+          animate={{ opacity: 1, scale: 1 }}
+          className="fixed z-50 w-80 rounded-lg border border-gray-200 bg-white shadow-lg"
+          exit={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.95 }}
+          key="contextual-chat-suggestions-panel"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            left: position.x,
+            top: position.y + 60, // Even closer spacing
+          }}
+          transition={{ duration: 0.2, delay: 0.1 }}
+        >
+          <div className="px-4 py-3">
+            <div className="mb-2 font-medium text-gray-500 text-xs">
+              Suggested
+            </div>
+            <div className="space-y-1">
+              <button
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-gray-700 text-sm hover:bg-gray-50"
+                onClick={() => handleQuickAction("explain")}
+                type="button"
+              >
+                <Sparkles className="h-4 w-4 text-purple-500" />
+                Explain this
+              </button>
+              <button
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-gray-700 text-sm hover:bg-gray-50"
+                onClick={() => handleQuickAction("simplify")}
+                type="button"
+              >
+                <MessageCircle className="h-4 w-4 text-blue-500" />
+                Simplify
+              </button>
+              <button
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-gray-700 text-sm hover:bg-gray-50"
+                onClick={() => handleQuickAction("quiz")}
+                type="button"
+              >
+                <span className="flex h-4 w-4 items-center justify-center text-green-500">
+                  🧠
+                </span>
+                Quiz me on this
+              </button>
+              <button
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-gray-700 text-sm hover:bg-gray-50"
+                onClick={() => handleQuickAction("examples")}
+                type="button"
+              >
+                <span className="flex h-4 w-4 items-center justify-center text-orange-500">
+                  💡
+                </span>
+                Give examples
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 }
