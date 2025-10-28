@@ -1,14 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageCircle, Send, X } from "lucide-react";
-import { useState } from "react";
+import { MessageCircle, Send, Sparkles, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Card, CardContent } from "./ui/card";
-import { Input } from "./ui/input";
-import { ScrollArea } from "./ui/scroll-area";
+// Removed unused Button import
 
 export type SelectionContext = {
   selectedText: string;
@@ -39,6 +35,51 @@ export function ContextualChatModal({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Calculate optimal position beside the selected text
+  useEffect(() => {
+    if (isOpen && context) {
+      // Get the current text selection to position the tooltip
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        // Position to the right of selection, or left if not enough space
+        const spaceOnRight = window.innerWidth - rect.right;
+        const panelWidth = 320; // Approximate panel width
+
+        let x = rect.right + 16; // 16px gap from selection
+        if (spaceOnRight < panelWidth + 32) {
+          x = rect.left - panelWidth - 16; // Position to the left instead
+        }
+
+        // Vertically center with the selection, but keep within viewport
+        let y = rect.top + rect.height / 2 - 200; // Approximate half panel height
+        y = Math.max(16, Math.min(y, window.innerHeight - 400 - 16));
+
+        setPosition({ x, y });
+      }
+    }
+  }, [isOpen, context]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messages.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages.length]);
+
+  // Focus input when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [isOpen]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || !context || isLoading) {
@@ -111,17 +152,8 @@ export function ContextualChatModal({
     }
   };
 
-  const getSourceTypeColor = (type: string) => {
-    switch (type) {
-      case "pdf":
-        return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300";
-      case "website":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300";
-      case "text":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300";
-      default:
-        return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300";
-    }
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
   if (!isOpen || !context) {
@@ -130,155 +162,147 @@ export function ContextualChatModal({
 
   return (
     <AnimatePresence>
+      {/* Minimal Tooltip Panel - No overlay, positioned beside selection */}
       <motion.div
-        animate={{ opacity: 1 }}
-        className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center"
-        exit={{ opacity: 0 }}
-        initial={{ opacity: 0 }}
-        onClick={onClose}
+        animate={{ opacity: 1, scale: 1 }}
+        className="fixed z-50 w-80 rounded-sm border border-gray-100 bg-white shadow-lg transition-all duration-200 hover:border-gray-200"
+        exit={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        ref={panelRef}
+        style={{
+          left: position.x,
+          top: position.y,
+          maxHeight: "400px",
+        }}
+        transition={{ duration: 0.2 }}
       >
-        <motion.div
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800"
-          exit={{ opacity: 0, scale: 0.95, y: 20 }}
-          initial={{ opacity: 0, scale: 0.95, y: 20 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between border-gray-200 border-b p-4 dark:border-gray-700">
-            <div className="flex items-center gap-3">
-              <MessageCircle className="h-5 w-5 text-indigo-600" />
-              <div>
-                <h2 className="font-semibold text-lg">
-                  Ask about this section
-                </h2>
-                <div className="mt-1 flex items-center gap-2">
-                  <Badge
-                    className={`text-xs ${getSourceTypeColor(context.sourceType)}`}
-                  >
-                    {getSourceTypeIcon(context.sourceType)}{" "}
-                    {context.sourceType.toUpperCase()}
-                  </Badge>
-                  <span className="max-w-xs truncate text-gray-500 text-sm">
-                    {context.sourceTitle}
-                  </span>
+        {/* Header - Notebook card style */}
+        <div className="flex items-start justify-between p-4 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="rounded-sm bg-gray-50 p-1">
+              <MessageCircle className="h-3 w-3 text-gray-600" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-normal text-gray-900 text-sm">
+                Ask about this
+              </h3>
+              <div className="flex items-center gap-1 text-gray-400 text-xs">
+                <span>{getSourceTypeIcon(context.sourceType)}</span>
+                <span className="truncate">{context.sourceTitle}</span>
+              </div>
+            </div>
+          </div>
+          <button
+            className="rounded-sm p-1 text-gray-400 hover:text-gray-600"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+
+        {/* Selected Text Quote - Subtle style */}
+        <div className="mx-4 mb-3 rounded-sm border-gray-200 border-l-2 bg-gray-50 px-3 py-2">
+          <p className="text-gray-600 text-xs italic leading-relaxed">
+            "
+            {context.selectedText.length > 100
+              ? `${context.selectedText.slice(0, 100)}...`
+              : context.selectedText}
+            "
+          </p>
+        </div>
+
+        {/* Messages Area - Compact */}
+        <div className="max-h-48 overflow-y-auto px-4">
+          {messages.length === 0 ? (
+            <div className="py-4 text-center">
+              <div className="mb-2 flex justify-center">
+                <div className="rounded-full bg-gray-100 p-2">
+                  <Sparkles className="h-4 w-4 text-gray-500" />
                 </div>
               </div>
+              <p className="text-gray-500 text-xs">
+                Ask me anything about this text
+              </p>
             </div>
-            <Button onClick={onClose} size="sm" variant="ghost">
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Selected Text Context */}
-          <div className="border-gray-100 border-b bg-gray-50/50 p-4 dark:border-gray-700 dark:bg-gray-700/30">
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30">
-                📝
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="mb-1 text-gray-600 text-sm dark:text-gray-400">
-                  Selected text:
-                </p>
-                <blockquote className="border-indigo-200 border-l-3 bg-white py-2 pl-4 text-gray-800 italic dark:border-indigo-700 dark:bg-gray-800 dark:text-gray-200">
-                  "{context.selectedText}"
-                </blockquote>
-              </div>
-            </div>
-          </div>
-
-          {/* Chat Messages */}
-          <ScrollArea className="max-h-96 flex-1 p-4">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <MessageCircle className="mb-4 h-12 w-12 text-gray-400" />
-                <h3 className="mb-2 font-medium text-gray-900 dark:text-gray-100">
-                  Ready to discuss this section!
-                </h3>
-                <p className="text-gray-500 text-sm dark:text-gray-400">
-                  Ask anything about the selected text and I'll provide
-                  context-aware answers.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((message) => (
+          ) : (
+            <div className="space-y-2 pb-2">
+              {messages.map((message) => (
+                <div
+                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                  key={message.id}
+                >
                   <div
-                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                    key={message.id}
+                    className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
+                      message.role === "user"
+                        ? "bg-gray-900 text-white"
+                        : "bg-gray-100 text-gray-800"
+                    }`}
                   >
-                    <Card
-                      className={`max-w-[80%] ${
+                    <p className="leading-relaxed">{message.content}</p>
+                    <div
+                      className={`mt-1 text-xs ${
                         message.role === "user"
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-50 dark:bg-gray-700"
+                          ? "text-gray-300"
+                          : "text-gray-500"
                       }`}
                     >
-                      <CardContent className="p-3">
-                        {message.role === "assistant" && (
-                          <div className="mb-2 flex items-center gap-2 text-gray-500 text-xs dark:text-gray-400">
-                            <span className="font-medium">
-                              🧠 AI responding to:
-                            </span>
-                            <span className="truncate">
-                              "{context.selectedText.slice(0, 30)}..."
-                            </span>
-                          </div>
-                        )}
-                        <p
-                          className={`text-sm ${
-                            message.role === "user"
-                              ? "text-white"
-                              : "text-gray-800 dark:text-gray-200"
-                          }`}
-                        >
-                          {message.content}
-                        </p>
-                      </CardContent>
-                    </Card>
+                      {formatTime(message.timestamp)}
+                    </div>
                   </div>
-                ))}
-                {isLoading && (
-                  <div className="flex justify-start">
-                    <Card className="bg-gray-50 dark:bg-gray-700">
-                      <CardContent className="p-3">
-                        <div className="flex items-center gap-2 text-gray-500 text-sm">
-                          <div className="flex space-x-1">
-                            <div className="h-2 w-2 animate-pulse rounded-full bg-gray-400" />
-                            <div className="animation-delay-200 h-2 w-2 animate-pulse rounded-full bg-gray-400" />
-                            <div className="animation-delay-400 h-2 w-2 animate-pulse rounded-full bg-gray-400" />
-                          </div>
-                          <span>AI is thinking...</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </div>
-            )}
-          </ScrollArea>
+                </div>
+              ))}
 
-          {/* Input Area */}
-          <div className="border-gray-200 border-t p-4 dark:border-gray-700">
-            <div className="flex gap-2">
-              <Input
-                className="flex-1"
-                disabled={isLoading}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Ask something about this section..."
-                value={inputValue}
-              />
-              <Button
-                disabled={!inputValue.trim() || isLoading}
-                onClick={handleSendMessage}
-                size="sm"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+              {/* Typing Indicator - Minimal */}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="rounded-lg bg-gray-100 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex space-x-1">
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+                      </div>
+                      <span className="text-gray-500 text-xs">
+                        AI thinking...
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
             </div>
+          )}
+        </div>
+
+        {/* Input Area - Compact */}
+        <div className="border-gray-100 border-t p-3">
+          <div className="flex items-center gap-2">
+            <input
+              className="flex-1 rounded-sm border border-gray-200 bg-white px-3 py-2 text-xs focus:border-gray-300 focus:outline-none"
+              disabled={isLoading}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask about this text..."
+              ref={inputRef}
+              value={inputValue}
+            />
+            <button
+              className={`rounded-sm p-2 text-xs transition-colors ${
+                inputValue.trim() && !isLoading
+                  ? "bg-gray-900 text-white hover:bg-gray-800"
+                  : "bg-gray-100 text-gray-400"
+              }`}
+              disabled={!inputValue.trim() || isLoading}
+              onClick={handleSendMessage}
+              type="button"
+            >
+              <Send className="h-3 w-3" />
+            </button>
           </div>
-        </motion.div>
+        </div>
       </motion.div>
     </AnimatePresence>
   );
