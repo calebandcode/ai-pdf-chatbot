@@ -19,6 +19,15 @@ export interface ProcessedContent {
     type: ContentType;
     source?: string;
     readingTime?: number;
+    summary?: string;
+    topics?: Array<{
+      topic: string;
+      description: string;
+      keyPoints: string[];
+    }>;
+    difficulty?: "beginner" | "intermediate" | "advanced";
+    category?: string;
+    wordCount?: number;
   };
 }
 

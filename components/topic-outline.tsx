@@ -13,9 +13,13 @@ import { startGuidedSession } from "@/app/actions/tutor-session";
 import { Response } from "@/components/elements/response";
 import { Suggestion } from "@/components/elements/suggestion";
 import { FloatingBubble } from "@/components/floating-bubble";
+import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
+import { TextSelectionBubble } from "@/components/text-selection-bubble";
+import { TipsCollection } from "@/components/tips-collection";
 import { useBubble } from "@/hooks/use-bubble";
+import { useTips } from "@/hooks/use-tips";
+import type { SubtopicQuizContext, TopicQuizContext } from "@/lib/types/quiz";
 import { sanitizeText } from "@/lib/utils";
-import { SubtopicQuizContext, TopicQuizContext } from "@/lib/types/quiz";
 
 // Loading skeleton component
 const LoadingSkeleton = () => (
@@ -60,9 +64,47 @@ export function TopicOutline({
     currentIndex: 0,
   });
 
+  // Text selection features
+  const [showTipsCollection, setShowTipsCollection] = useState(false);
+  const [showQuizModal, setShowQuizModal] = useState(false);
+  const [selectedText, setSelectedText] = useState("");
+  const [quizSource, setQuizSource] = useState<string | undefined>();
+
+  const { tips, addTip, deleteTip } = useTips();
+
   // Bubble system
   const { isOpen, bubbleData, position, bubbleRef, openBubble, closeBubble } =
     useBubble();
+
+  // Text selection handlers
+  const handleHighlight = (_text: string, _range: Range) => {
+    console.log("Highlighting text:", _text);
+    // The highlighting is already handled in the TextSelectionBubble component
+  };
+
+  const handleSaveTip = (text: string, source?: string) => {
+    addTip(text, source);
+    console.log("Tip saved:", { text, source });
+  };
+
+  const handleQuizMe = (text: string) => {
+    setSelectedText(text);
+    setQuizSource(documentTitle || "Topic Outline");
+    setShowQuizModal(true);
+  };
+
+  const handleAddNote = (text: string) => {
+    const note = prompt("Add a note for this text:", "");
+    if (note) {
+      addTip(text, documentTitle || "Topic Outline", note);
+    }
+  };
+
+  const handleQuizFromTip = (text: string) => {
+    setSelectedText(text);
+    setQuizSource("Saved Tip");
+    setShowQuizModal(true);
+  };
 
   const handleQuizBubble = async (
     event: React.MouseEvent | { currentTarget: HTMLElement },
@@ -70,7 +112,10 @@ export function TopicOutline({
     pages: number[]
   ) => {
     // Handle both real events and mock events
-    if ('stopPropagation' in event && typeof event.stopPropagation === 'function') {
+    if (
+      "stopPropagation" in event &&
+      typeof event.stopPropagation === "function"
+    ) {
       event.stopPropagation();
     }
     const element = event.currentTarget as HTMLElement;
@@ -82,7 +127,7 @@ export function TopicOutline({
         console.log("🔄 Generating topic content for quiz...");
         const result = await generateTopicExplanationAction({
           topicName: topic,
-          description: topics.find(t => t.topic === topic)?.description || "",
+          description: topics.find((t) => t.topic === topic)?.description || "",
           pages,
           documentTitle,
           previousTopics: conversationContext.topicsCovered,
@@ -103,14 +148,14 @@ export function TopicOutline({
         scope: "topic",
         topicName: topic,
         topicPages: pages,
-        allSubtopics: topics.find(t => t.topic === topic)?.subtopics || [],
+        allSubtopics: topics.find((t) => t.topic === topic)?.subtopics || [],
         topicContent: content,
         rawContent: "", // Will be fetched by the action
         questionCount: 5,
         difficulty: "mixed",
         documentIds,
         chatId,
-        documentTitle: documentTitle, // Add document title for language context
+        documentTitle, // Add document title for language context
       };
 
       // Generate quiz using unified system
@@ -181,7 +226,7 @@ export function TopicOutline({
           currentIndex: conversationContext.currentIndex,
           totalTopics: topics.length,
         },
-        documentTitle: documentTitle, // Add document title for language context
+        documentTitle, // Add document title for language context
       };
 
       // Generate quiz using unified system
@@ -218,12 +263,15 @@ export function TopicOutline({
         topic,
         content: topicContent[topic] || "Loading additional information...",
         sourcePage: pages[0] || 1,
-        pages: pages,
+        pages,
         relatedTopics: topics
           .filter((t) => t.topic !== topic)
           .slice(0, 3)
           .map((t) => t.topic),
-        sources: pages.length > 0 ? `${pages.length} references` : "No sources available",
+        sources:
+          pages.length > 0
+            ? `${pages.length} references`
+            : "No sources available",
       },
       sourceElement: element,
     });
@@ -538,7 +586,10 @@ export function TopicOutline({
             transition={{ duration: 0.3, delay: index * 0.1 }}
           >
             {/* Topic Header - Story-like Style with Subtle Background */}
-            <div className="group rounded-lg border border-transparent bg-gray-50/50 p-4 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50" data-topic={topic.topic}>
+            <div
+              className="group rounded-lg border border-transparent bg-gray-50/50 p-4 transition-all duration-200 hover:border-gray-200 hover:bg-gray-50"
+              data-topic={topic.topic}
+            >
               <div className="flex items-start justify-between gap-4">
                 {/* Left side - Topic info */}
                 <div className="min-w-0 flex-1">
@@ -600,7 +651,9 @@ export function TopicOutline({
                       <Suggestion
                         onClick={() => {
                           const mockEvent = {
-                            currentTarget: document.querySelector(`[data-topic="${topic.topic}"]`) as HTMLElement,
+                            currentTarget: document.querySelector(
+                              `[data-topic="${topic.topic}"]`
+                            ) as HTMLElement,
                           };
                           handleQuizBubble(mockEvent, topic.topic, topic.pages);
                         }}
@@ -663,15 +716,14 @@ export function TopicOutline({
                       )}
                     </motion.div>
 
-
                     {/* Subtopics - Conversational Introduction */}
                     {isExpanded && hasSubtopics && (
-                                  <motion.div
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="ml-4"
-                                    initial={{ opacity: 0, y: -5 }}
-                                    transition={{ duration: 0.3 }}
-                                  >
+                      <motion.div
+                        animate={{ opacity: 1, y: 0 }}
+                        className="ml-4"
+                        initial={{ opacity: 0, y: -5 }}
+                        transition={{ duration: 0.3 }}
+                      >
                         <p className="mb-4 font-medium text-gray-600 text-sm">
                           Let's break this down further:
                         </p>
@@ -831,7 +883,7 @@ export function TopicOutline({
                                       <div className="flex gap-2">
                                         {/* No left actions for subtopics */}
                                       </div>
-                                      
+
                                       {/* Right side - Quiz */}
                                       <div className="flex gap-2">
                                         <Suggestion
@@ -839,10 +891,16 @@ export function TopicOutline({
                                           onClick={() => {
                                             // Create a mock event for positioning
                                             const mockEvent = {
-                                              currentTarget: document.querySelector(`[data-subtopic="${subtopic.subtopic}"]`) as HTMLElement || document.body,
-                                              stopPropagation: () => {}
+                                              currentTarget:
+                                                (document.querySelector(
+                                                  `[data-subtopic="${subtopic.subtopic}"]`
+                                                ) as HTMLElement) ||
+                                                document.body,
+                                              stopPropagation: () => {
+                                                // Mock stopPropagation for positioning
+                                              },
                                             } as unknown as React.MouseEvent;
-                                            
+
                                             handleSubtopicQuizBubble(
                                               mockEvent,
                                               subtopic.subtopic,
@@ -880,6 +938,32 @@ export function TopicOutline({
         onClose={closeBubble}
         position={position}
         ref={bubbleRef}
+      />
+
+      {/* Text Selection Features */}
+      <TextSelectionBubble
+        onAddNote={handleAddNote}
+        onHighlight={handleHighlight}
+        onQuizMe={handleQuizMe}
+        onSaveTip={handleSaveTip}
+        source={documentTitle || "Topic Outline"}
+      />
+
+      {/* Tips Collection Modal */}
+      <TipsCollection
+        isOpen={showTipsCollection}
+        onClose={() => setShowTipsCollection(false)}
+        onDeleteTip={deleteTip}
+        onQuizFromTip={handleQuizFromTip}
+        tips={tips}
+      />
+
+      {/* Quiz from Text Modal */}
+      <QuizFromTextModal
+        isOpen={showQuizModal}
+        onClose={() => setShowQuizModal(false)}
+        selectedText={selectedText}
+        source={quizSource}
       />
     </div>
   );
