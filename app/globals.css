@@ -279,6 +279,28 @@ html {
   @apply bg-blue-200 hover:bg-blue-300 dark:hover:bg-blue-400/50 dark:text-blue-50 dark:bg-blue-500/40;
 }
 
+/* Custom text selection styling - subtle purple/blue */
+::selection {
+  background-color: rgba(139, 92, 246, 0.2); /* Subtle purple */
+  color: inherit;
+}
+
+::-moz-selection {
+  background-color: rgba(139, 92, 246, 0.2); /* Subtle purple for Firefox */
+  color: inherit;
+}
+
+/* Dark mode text selection */
+.dark ::selection {
+  background-color: rgba(139, 92, 246, 0.3); /* Slightly more visible in dark mode */
+  color: inherit;
+}
+
+.dark ::-moz-selection {
+  background-color: rgba(139, 92, 246, 0.3); /* Firefox dark mode */
+  color: inherit;
+}
+
 /* minimal scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
