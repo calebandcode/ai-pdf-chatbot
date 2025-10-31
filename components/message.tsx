@@ -158,7 +158,12 @@ const PurePreviewMessage = ({
                           : undefined
                       }
                     >
-                      <Response>{sanitizeText(part.text)}</Response>
+                      <Response 
+                        isStreaming={isLoading && message.role === "assistant"}
+                        speed={20}
+                      >
+                        {sanitizeText(part.text)}
+                      </Response>
                     </MessageContent>
                   </div>
                 );

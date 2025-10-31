@@ -13,6 +13,16 @@ html {
   scroll-padding-bottom: 1rem;
 }
 
+/* Hide scrollbars while allowing scroll */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* include utility classes in streamdown */
 @source '../node_modules/streamdown/dist/index.js';
 

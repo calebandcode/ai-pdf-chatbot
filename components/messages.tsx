@@ -1,7 +1,7 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownIcon, BookOpen } from "lucide-react";
+import { ArrowDownIcon, BookOpen, Sparkles } from "lucide-react";
 import { memo, useEffect, useState } from "react";
 import { useMessages } from "@/hooks/use-messages";
 import { useTips } from "@/hooks/use-tips";
@@ -14,7 +14,9 @@ import {
 import { useDataStream } from "./data-stream-provider";
 import { DynamicGreeting } from "./dynamic-greeting";
 import { Conversation, ConversationContent } from "./elements/conversation";
-import { PreviewMessage, ThinkingMessage } from "./message";
+import { MinimalLoading } from "./loading/minimal-loading";
+import { AIThinking } from "./streaming/typing-indicator";
+import { PreviewMessage } from "./message";
 import { NotebookCards } from "./notebook-cards";
 import { QuizFromTextModal } from "./quiz-from-text-modal";
 import { TextSelectionBubble } from "./text-selection-bubble";
@@ -165,7 +167,24 @@ function PureMessages({
           {status === "submitted" &&
             messages.length > 0 &&
             messages.at(-1)?.role === "user" &&
-            selectedModelId !== "chat-model-reasoning" && <ThinkingMessage />}
+            selectedModelId !== "chat-model-reasoning" && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                className="flex items-start gap-3"
+              >
+                <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
+                  <Sparkles size={14} />
+                </div>
+                <div className="flex w-full flex-col gap-2 md:gap-4">
+                  <div className="p-0 text-muted-foreground text-sm">
+                    <AIThinking message="AI is thinking..." />
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
           <div
             className="min-h-[24px] min-w-[24px] shrink-0"
@@ -201,7 +220,7 @@ function PureMessages({
           initial={{ opacity: 0, scale: 0.8 }}
         >
           <Button
-            className="rounded-full shadow-lg transition-all duration-200 hover:shadow-xl"
+            className="rounded-full border border-border-subtle bg-bg-floating shadow-lg backdrop-blur-md transition-all duration-200 hover:scale-105 hover:shadow-xl"
             onClick={() => setShowTipsCollection(true)}
             size="sm"
           >

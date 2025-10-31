@@ -24,6 +24,7 @@ import { generateQuiz } from "@/app/actions/generate-quiz";
 import { processAndCreateNotebook } from "@/app/actions/process-and-create-notebook";
 import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
 import { SelectItem } from "@/components/ui/select";
+// Removed global loading system - using text placeholders instead
 import { chatModels } from "@/lib/ai/models";
 import { myProvider } from "@/lib/ai/providers";
 import type { Attachment, ChatMessage, QuizOfferPayload } from "@/lib/types";
@@ -50,6 +51,7 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
 
 function PureMultimodalInput({
@@ -198,8 +200,13 @@ function PureMultimodalInput({
     }
   };
 
-  // Dynamic placeholder based on content type
+  // Dynamic placeholder based on content type and loading state
   const getPlaceholder = () => {
+    // Don't show processing steps in placeholder - only in loading indicator
+    if (isProcessingAttachments) {
+      return "Processing your file...";
+    }
+    
     switch (contentType) {
       case "pdf":
         return "Upload PDF or drag & drop to start learning...";
@@ -217,6 +224,7 @@ function PureMultimodalInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadQueue, setUploadQueue] = useState<string[]>([]);
   const [isProcessingAttachments, setIsProcessingAttachments] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string>("");
 
   const submitForm = useCallback(async () => {
     if (isProcessingAttachments) {
@@ -514,6 +522,25 @@ function PureMultimodalInput({
     [usage]
   );
 
+  // Progressive loading steps for PDF processing
+  const simulateProcessingSteps = async (fileName: string) => {
+    const steps = [
+      `Uploading ${fileName}...`,
+      "Extracting text from PDF...",
+      "Analyzing document structure...",
+      "Processing content for AI...",
+      "Generating insights...",
+      "Preparing for chat..."
+    ];
+
+    for (let i = 0; i < steps.length; i++) {
+      setProcessingStep(steps[i]);
+      // Much slower, more realistic delays
+      const delay = i === 0 ? 1500 : i === 1 ? 2000 : i === 2 ? 1800 : i === 3 ? 2500 : i === 4 ? 1500 : 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  };
+
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       // Guard against duplicate invocations
@@ -541,12 +568,19 @@ function PureMultimodalInput({
         sessionStorage.setItem("uploadInProgress", "1");
 
         try {
+          // Start progressive loading steps
+          const processingPromise = simulateProcessingSteps(pdfFiles[0].name);
+          
           const formData = new FormData();
           for (const file of pdfFiles) {
             formData.append("files", file, file.name);
           }
 
-          const { documents } = await uploadAndIngest(formData);
+          // Wait for both processing steps and actual upload
+          const [, { documents }] = await Promise.all([
+            processingPromise,
+            uploadAndIngest(formData)
+          ]);
 
           if (!documents || documents.length === 0) {
             throw new Error("No documents returned from ingestion");
@@ -582,6 +616,7 @@ function PureMultimodalInput({
         } finally {
           setUploadQueue([]);
           setIsProcessingAttachments(false);
+          setProcessingStep("");
           sessionStorage.removeItem("uploadInProgress");
         }
         return;
@@ -590,8 +625,22 @@ function PureMultimodalInput({
       // Handle image files with the existing uploadFile logic
       if (imageFiles.length > 0) {
         setUploadQueue(imageFiles.map((file) => file.name));
+        setIsProcessingAttachments(true);
 
         try {
+          // Progressive steps for image processing
+          const imageSteps = [
+            `Uploading ${imageFiles[0].name}...`,
+            "Processing image content...",
+            "Extracting visual information...",
+            "Preparing for analysis..."
+          ];
+
+          for (let i = 0; i < imageSteps.length; i++) {
+            setProcessingStep(imageSteps[i]);
+            await new Promise(resolve => setTimeout(resolve, 1200));
+          }
+
           const uploadPromises = imageFiles.map((file) => uploadFile(file));
           const uploadedAttachments = await Promise.all(uploadPromises);
           const successfullyUploadedAttachments = uploadedAttachments.filter(
@@ -602,10 +651,17 @@ function PureMultimodalInput({
             ...currentAttachments,
             ...successfullyUploadedAttachments,
           ]);
+
+          toast.success(
+            `Successfully uploaded ${successfullyUploadedAttachments.length} image(s)`
+          );
         } catch (error) {
           console.error("Error uploading files!", error);
+          toast.error("Failed to upload images. Please try again.");
         } finally {
           setUploadQueue([]);
+          setIsProcessingAttachments(false);
+          setProcessingStep("");
         }
       }
     },
@@ -734,6 +790,14 @@ function PureMultimodalInput({
             ))}
           </div>
         )}
+        {/* Loading indicator when processing */}
+        {isProcessingAttachments && (
+          <div className="mb-2 flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent dark:border-blue-400" />
+            <span className="font-medium">{processingStep || "Processing your file..."}</span>
+          </div>
+        )}
+        
         <div className="flex flex-row items-start gap-1 sm:gap-2">
           <PromptInputTextarea
             autoFocus
@@ -784,17 +848,26 @@ function PureMultimodalInput({
           {status === "submitted" ? (
             <StopButton setMessages={setMessages} stop={stop} />
           ) : (
-            <PromptInputSubmit
-              className="size-8 rounded-full bg-primary text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground"
-              disabled={
-                uploadQueue.length > 0 ||
-                isProcessingAttachments ||
-                (!input.trim() && attachments.length === 0)
-              }
-              status={isProcessingAttachments ? "submitted" : status}
-            >
-              <ArrowUpIcon size={14} />
-            </PromptInputSubmit>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PromptInputSubmit
+                    className="size-8 rounded-full bg-primary text-primary-foreground transition-colors duration-200 hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground"
+                    disabled={
+                      uploadQueue.length > 0 ||
+                      isProcessingAttachments ||
+                      (!input.trim() && attachments.length === 0)
+                    }
+                    status={isProcessingAttachments ? "submitted" : status}
+                  >
+                    <ArrowUpIcon size={14} />
+                  </PromptInputSubmit>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Send message</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </PromptInputToolbar>
       </PromptInput>
@@ -922,17 +995,26 @@ function PureStopButton({
   setMessages: UseChatHelpers<ChatMessage>["setMessages"];
 }) {
   return (
-    <Button
-      className="size-7 rounded-full bg-foreground p-1 text-background transition-colors duration-200 hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground"
-      data-testid="stop-button"
-      onClick={(event) => {
-        event.preventDefault();
-        stop();
-        setMessages((messages) => messages);
-      }}
-    >
-      <StopIcon size={14} />
-    </Button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            className="size-7 rounded-full bg-foreground p-1 text-background transition-colors duration-200 hover:bg-foreground/90 disabled:bg-muted disabled:text-muted-foreground"
+            data-testid="stop-button"
+            onClick={(event) => {
+              event.preventDefault();
+              stop();
+              setMessages((messages) => messages);
+            }}
+          >
+            <StopIcon size={14} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Stop generation</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

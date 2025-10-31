@@ -79,9 +79,11 @@ export async function POST(request: NextRequest) {
 2. Use the surrounding context to provide a more complete explanation
 3. Be educational and clear - explain concepts in an accessible way
 4. If relevant, reference other parts of the source material
-5. Keep your response concise but thorough (2-3 paragraphs max)
+5. Keep your response concise but thorough (2-3 paragraphs with 2-3 sentences each max)
 6. If this is part of an ongoing conversation, build on previous exchanges
 
+Example Output:
+“In this part, you’re basically learning how to make Python actually run. It introduces two main approaches — interactive mode (REPL) for quick tests and scripts for bigger projects. It’s the step that turns theory into action.”
 **Your response:**`,
     });
 

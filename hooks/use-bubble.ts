@@ -24,7 +24,7 @@ export function useBubble() {
   const [position, setPosition] = useState<BubblePosition | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
 
-  const calculatePosition = useCallback((sourceElement: HTMLElement) => {
+  const calculatePosition = useCallback((sourceElement: HTMLElement, bubbleType?: BubbleContentType) => {
     const rect = sourceElement.getBoundingClientRect();
     const viewport = {
       width: window.innerWidth,
@@ -37,7 +37,37 @@ export function useBubble() {
 
     // Calculate optimal position
     let x = rect.left + rect.width / 2 - bubbleWidth / 2;
-    let y = rect.bottom + 10; // 10px gap below element
+
+    // FOR QUIZ BUBBLES: Force to upper portion, NEVER at bottom
+    if (bubbleType === "quiz") {
+      // Always position quiz bubbles in the upper portion of viewport
+      const y = Math.max(80, Math.min(100, viewport.height * 0.1)); // Top 10% of viewport, max 100px from top
+      
+      // Adjust for viewport boundaries
+      if (x < 20) {
+        x = 20;
+      }
+      if (x + bubbleWidth > viewport.width - 20) {
+        x = viewport.width - bubbleWidth - 20;
+      }
+
+      return {
+        x: Math.max(20, Math.min(x, viewport.width - bubbleWidth - 20)),
+        y: Math.max(80, Math.min(y, 120)), // Keep it high, between 80-120px from top
+        width: bubbleWidth,
+        height: bubbleHeight,
+      };
+    }
+
+    // For other bubble types, use original logic
+    let y = rect.bottom + 10; // Default: 10px gap below element
+
+    // Check if we can position above the element
+    if (rect.top - bubbleHeight - 10 > 80) {
+      y = rect.top - bubbleHeight - 10;
+    } else if (rect.bottom + bubbleHeight > viewport.height - 80) {
+      y = Math.max(80, viewport.height - bubbleHeight - 20);
+    }
 
     // Adjust for viewport boundaries
     if (x < 20) {
@@ -47,19 +77,14 @@ export function useBubble() {
       x = viewport.width - bubbleWidth - 20;
     }
 
-    // If not enough space below, position above
+    // Final boundary check
     if (y + bubbleHeight > viewport.height - 20) {
-      y = rect.top - bubbleHeight - 10;
-    }
-
-    // If still not enough space, center vertically
-    if (y < 20) {
-      y = Math.max(20, (viewport.height - bubbleHeight) / 2);
+      y = Math.max(80, viewport.height - bubbleHeight - 20);
     }
 
     return {
       x: Math.max(20, Math.min(x, viewport.width - bubbleWidth - 20)),
-      y: Math.max(20, Math.min(y, viewport.height - bubbleHeight - 20)),
+      y: Math.max(80, Math.min(y, viewport.height - bubbleHeight - 20)),
       width: bubbleWidth,
       height: bubbleHeight,
     };
@@ -68,7 +93,7 @@ export function useBubble() {
   const openBubble = useCallback(
     (data: BubbleData) => {
       if (data.sourceElement) {
-        const newPosition = calculatePosition(data.sourceElement);
+        const newPosition = calculatePosition(data.sourceElement, data.type);
         setPosition(newPosition);
       }
       setBubbleData(data);

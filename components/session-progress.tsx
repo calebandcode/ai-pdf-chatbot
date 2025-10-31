@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Clock, TrendingUp } from "lucide-react";
+import { BookOpen, Clock, Lightbulb, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -93,8 +93,9 @@ export function SessionProgress({
         {questionsAnswered > 0 && (
           <div className="rounded-lg border bg-blue-50 p-3">
             <p className="text-blue-800 text-sm">
-              💡 <strong>Great job!</strong> You're actively learning and
-              improving your understanding. Keep up the excellent work!
+              <Lightbulb className="mr-1 h-4 w-4 text-yellow-500" />{" "}
+              <strong>Great job!</strong> You're actively learning and improving
+              your understanding. Keep up the excellent work!
             </p>
           </div>
         )}
@@ -102,4 +103,3 @@ export function SessionProgress({
     </Card>
   );
 }
-
