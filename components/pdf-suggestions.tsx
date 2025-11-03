@@ -1,23 +1,23 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BookOpen, Brain, MessageSquare, Zap } from "lucide-react";
+import { BookOpen, Brain, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export interface PDFSuggestionAction {
+export type PDFSuggestionAction = {
   id: string;
-  type: "quiz_drill" | "generate_quiz" | "flashcards" | "ask_questions";
+  type: "quiz_drill" | "generate_quiz" | "flashcards";
   label: string;
   description: string;
   icon: React.ReactNode;
   action: () => void;
-}
+};
 
-interface PDFSuggestionsProps {
+type PDFSuggestionsProps = {
   actions: PDFSuggestionAction[];
   className?: string;
-}
+};
 
 export function PDFSuggestions({ actions, className }: PDFSuggestionsProps) {
   return (
@@ -61,9 +61,9 @@ export function createPDFSuggestionActions(
   docId: string,
   chatId: string,
   onAction: (
-    type: PDFSuggestionAction["type"],
+    actionType: PDFSuggestionAction["type"],
     documentId: string,
-    chatId: string
+    cId: string
   ) => void
 ): PDFSuggestionAction[] {
   return [
@@ -90,14 +90,6 @@ export function createPDFSuggestionActions(
       description: "Interactive study cards",
       icon: <Brain className="h-4 w-4" />,
       action: () => onAction("flashcards", docId, chatId),
-    },
-    {
-      id: "ask-questions",
-      type: "ask_questions",
-      label: "Ask Questions",
-      description: "Get answers from the document",
-      icon: <MessageSquare className="h-4 w-4" />,
-      action: () => onAction("ask_questions", docId, chatId),
     },
   ];
 }

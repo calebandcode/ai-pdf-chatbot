@@ -6,22 +6,28 @@ import {
   Copy,
   Highlighter,
   MessageCircle,
-  Save,
   StickyNote,
   Volume2,
-  ChevronDown,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useTextSelection } from "@/hooks/use-text-selection";
 import { Button } from "./ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 
 type TextSelectionBubbleProps = {
   onHighlight?: (text: string, range: Range) => void;
-  onSaveTip?: (text: string, source?: string) => void;
   onQuizMe?: (text: string) => void;
-  onAddNote?: (text: string) => void;
+  onAddNote?: (
+    text: string,
+    range: Range,
+    position: { x: number; y: number }
+  ) => void;
   onAskAboutThis?: (text: string, context: SelectionContext) => void;
   source?: string;
 };
@@ -36,7 +42,6 @@ type SelectionContext = {
 
 export function TextSelectionBubble({
   onHighlight,
-  onSaveTip,
   onQuizMe,
   onAddNote,
   onAskAboutThis,
@@ -78,14 +83,45 @@ export function TextSelectionBubble({
     };
   }, [isSelecting, selection, clearSelection]);
 
+  // Check if current selection has a highlight
+  const checkForHighlight = useCallback(() => {
+    if (!selection?.range) {
+      setHasHighlight(false);
+      return;
+    }
+
+    try {
+      const range = selection.range.cloneRange();
+      const container = range.commonAncestorContainer;
+
+      // Find the closest mark element
+      let current: Element | null =
+        container.nodeType === Node.TEXT_NODE
+          ? container.parentElement
+          : (container as Element);
+
+      while (current && current !== document.body) {
+        if (current.tagName === "MARK") {
+          setHasHighlight(true);
+          return;
+        }
+        current = current.parentElement;
+      }
+
+      setHasHighlight(false);
+    } catch {
+      setHasHighlight(false);
+    }
+  }, [selection?.range]);
+
   // Close color picker when selection changes and check for highlights
   useEffect(() => {
-    if (!isSelecting) {
-      setShowColorPicker(false);
-    } else {
+    if (isSelecting) {
       checkForHighlight();
+    } else {
+      setShowColorPicker(false);
     }
-  }, [isSelecting, selection]);
+  }, [isSelecting, checkForHighlight]);
 
   // Extract surrounding context from the selection
   const extractContext = (): SelectionContext => {
@@ -137,33 +173,6 @@ export function TextSelectionBubble({
     clearSelection();
   };
 
-  const checkForHighlight = () => {
-    if (!selection?.range) {
-      setHasHighlight(false);
-      return;
-    }
-
-    try {
-      const range = selection.range.cloneRange();
-      const container = range.commonAncestorContainer;
-      
-      // Find the closest mark element
-      let current: Element | null = container.nodeType === Node.TEXT_NODE ? container.parentElement : container as Element;
-      
-      while (current && current !== document.body) {
-        if (current.tagName === 'MARK') {
-          setHasHighlight(true);
-          return;
-        }
-        current = current.parentElement;
-      }
-      
-      setHasHighlight(false);
-    } catch (error) {
-      setHasHighlight(false);
-    }
-  };
-
   const handleHighlight = (color: string) => {
     if (!selection?.range) {
       return;
@@ -205,24 +214,27 @@ export function TextSelectionBubble({
       // Get the range and check if it's within a mark element
       const range = selection.range.cloneRange();
       const container = range.commonAncestorContainer;
-      
+
       // Find the closest mark element
       let markElement: Element | null = null;
-      let current: Element | null = container.nodeType === Node.TEXT_NODE ? container.parentElement : container as Element;
-      
+      let current: Element | null =
+        container.nodeType === Node.TEXT_NODE
+          ? container.parentElement
+          : (container as Element);
+
       while (current && current !== document.body) {
-        if (current.tagName === 'MARK') {
+        if (current.tagName === "MARK") {
           markElement = current;
           break;
         }
         current = current.parentElement;
       }
-      
+
       if (markElement) {
         // Replace the mark with its text content
         const parent = markElement.parentNode;
         if (parent) {
-          const textContent = markElement.textContent || '';
+          const textContent = markElement.textContent || "";
           const textNode = document.createTextNode(textContent);
           parent.replaceChild(textNode, markElement);
           setHasHighlight(false);
@@ -267,16 +279,6 @@ export function TextSelectionBubble({
     clearSelection();
   };
 
-  const handleSaveTip = () => {
-    if (!selection?.text) {
-      return;
-    }
-
-    onSaveTip?.(selection.text, source);
-    toast.success("Tip saved to your collection!");
-    clearSelection();
-  };
-
   const handleQuizMe = () => {
     if (!selection?.text) {
       return;
@@ -288,13 +290,18 @@ export function TextSelectionBubble({
   };
 
   const handleAddNote = () => {
-    if (!selection?.text) {
+    if (!selection?.text || !selection?.range) {
       return;
     }
 
-    onAddNote?.(selection.text);
-    toast.success("Note added!");
-    clearSelection();
+    if (onAddNote) {
+      onAddNote(selection.text, selection.range, selection.position);
+    } else {
+      console.error(
+        "onAddNote is not defined! Note functionality not available."
+      );
+    }
+    // Don't clear selection here - let the note bubble handle it
   };
 
   const handleCopy = async () => {
@@ -309,7 +316,7 @@ export function TextSelectionBubble({
       console.error("Failed to copy text:", error);
       toast.error("Failed to copy text");
     }
-    
+
     clearSelection();
   };
 
@@ -337,7 +344,9 @@ export function TextSelectionBubble({
             <TooltipTrigger asChild>
               <Button
                 className={`h-10 w-10 rounded-lg border-0 bg-transparent p-0 transition-all duration-200 hover:scale-110 ${
-                  showColorPicker ? "bg-yellow-100 dark:bg-yellow-900/30" : "hover:bg-yellow-50 dark:hover:bg-yellow-900/20"
+                  showColorPicker
+                    ? "bg-yellow-100 dark:bg-yellow-900/30"
+                    : "hover:bg-yellow-50 dark:hover:bg-yellow-900/20"
                 }`}
                 onClick={handleHighlightButtonClick}
                 size="sm"
@@ -364,22 +373,6 @@ export function TextSelectionBubble({
             </TooltipTrigger>
             <TooltipContent>
               <p>Pronounce text</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                className="h-10 w-10 rounded-lg border-0 bg-transparent p-0 transition-all duration-200 hover:scale-110 hover:bg-green-50 dark:hover:bg-green-900/20"
-                onClick={handleSaveTip}
-                size="sm"
-                variant="ghost"
-              >
-                <Save className="h-5 w-5 text-green-600" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Save to tips</p>
             </TooltipContent>
           </Tooltip>
 
@@ -447,30 +440,33 @@ export function TextSelectionBubble({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        
+
         {/* Color Picker Dropdown - positioned relative to the main bubble */}
         <AnimatePresence>
           {showColorPicker && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="-translate-x-1/2 absolute bottom-full left-1/2 mb-2 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800"
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="absolute bottom-full left-1/2 mb-2 flex -translate-x-1/2 flex-col gap-1 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
               style={{ zIndex: 1000 }}
             >
-              <div className="mb-1 text-gray-600 text-xs font-medium">Choose color:</div>
+              <div className="mb-1 font-medium text-gray-600 text-xs">
+                Choose color:
+              </div>
               <div className="grid grid-cols-3 gap-1">
                 {highlightColors.map((color) => (
                   <button
-                    key={color.value}
                     className={`h-6 w-6 rounded border-2 transition-all hover:scale-110 ${
                       selectedColor === color.value
                         ? "border-gray-400 ring-2 ring-gray-300"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
+                    key={color.value}
                     onClick={() => handleColorSelect(color.value)}
                     style={{ backgroundColor: color.value }}
                     title={color.name}
+                    type="button"
                   />
                 ))}
               </div>
@@ -480,6 +476,7 @@ export function TextSelectionBubble({
                     className="flex items-center gap-1 rounded px-2 py-1 text-gray-600 text-xs transition-colors hover:bg-gray-100 hover:text-gray-800"
                     onClick={handleClearHighlight}
                     title="Clear highlight"
+                    type="button"
                   >
                     <span>Clear highlight</span>
                   </button>

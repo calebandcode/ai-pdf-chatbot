@@ -23,6 +23,27 @@ html {
   display: none;
 }
 
+/* Reading Font Classes */
+.font-inter {
+  font-family: "Inter", sans-serif;
+}
+
+.font-merriweather {
+  font-family: "Merriweather", serif;
+}
+
+.font-lora {
+  font-family: "Lora", serif;
+}
+
+.font-manrope {
+  font-family: "Manrope", sans-serif;
+}
+
+.font-roboto-mono {
+  font-family: "Roboto Mono", monospace;
+}
+
 /* include utility classes in streamdown */
 @source '../node_modules/streamdown/dist/index.js';
 

@@ -264,6 +264,7 @@ export function Chat({
             <MultimodalInput
               attachments={attachments}
               chatId={id}
+              documentIds={allDocumentIds}
               input={input}
               messages={messages}
               onModelChange={setCurrentModelId}

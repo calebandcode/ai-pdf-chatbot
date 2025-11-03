@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { FontProvider } from "@/contexts/font-context";
 
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
@@ -62,6 +63,10 @@ export default function RootLayout({
             __html: THEME_COLOR_SCRIPT,
           }}
         />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700&family=Lora:wght@400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=Roboto+Mono:wght@300;400;500;600&display=swap"
+          rel="stylesheet"
+        />
       </head>
       <body className="antialiased">
         <ThemeProvider
@@ -71,8 +76,10 @@ export default function RootLayout({
           enableSystem={false}
           forcedTheme="light"
         >
-          <Toaster position="top-center" />
-          <SessionProvider>{children}</SessionProvider>
+          <FontProvider>
+            <Toaster position="top-center" />
+            <SessionProvider>{children}</SessionProvider>
+          </FontProvider>
         </ThemeProvider>
       </body>
     </html>

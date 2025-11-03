@@ -51,7 +51,12 @@ import {
 import { PreviewAttachment } from "./preview-attachment";
 import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import type { VisibilityType } from "./visibility-selector";
 
 function PureMultimodalInput({
@@ -71,6 +76,7 @@ function PureMultimodalInput({
   onModelChange,
   usage,
   onDocumentUploaded,
+  documentIds,
 }: {
   chatId: string;
   input: string;
@@ -88,6 +94,7 @@ function PureMultimodalInput({
   onModelChange?: (modelId: string) => void;
   usage?: AppUsage;
   onDocumentUploaded?: () => void;
+  documentIds?: string[];
 }) {
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -206,7 +213,7 @@ function PureMultimodalInput({
     if (isProcessingAttachments) {
       return "Processing your file...";
     }
-    
+
     switch (contentType) {
       case "pdf":
         return "Upload PDF or drag & drop to start learning...";
@@ -530,14 +537,25 @@ function PureMultimodalInput({
       "Analyzing document structure...",
       "Processing content for AI...",
       "Generating insights...",
-      "Preparing for chat..."
+      "Preparing for chat...",
     ];
 
     for (let i = 0; i < steps.length; i++) {
       setProcessingStep(steps[i]);
       // Much slower, more realistic delays
-      const delay = i === 0 ? 1500 : i === 1 ? 2000 : i === 2 ? 1800 : i === 3 ? 2500 : i === 4 ? 1500 : 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
+      const delay =
+        i === 0
+          ? 1500
+          : i === 1
+            ? 2000
+            : i === 2
+              ? 1800
+              : i === 3
+                ? 2500
+                : i === 4
+                  ? 1500
+                  : 1000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   };
 
@@ -570,7 +588,7 @@ function PureMultimodalInput({
         try {
           // Start progressive loading steps
           const processingPromise = simulateProcessingSteps(pdfFiles[0].name);
-          
+
           const formData = new FormData();
           for (const file of pdfFiles) {
             formData.append("files", file, file.name);
@@ -579,7 +597,7 @@ function PureMultimodalInput({
           // Wait for both processing steps and actual upload
           const [, { documents }] = await Promise.all([
             processingPromise,
-            uploadAndIngest(formData)
+            uploadAndIngest(formData),
           ]);
 
           if (!documents || documents.length === 0) {
@@ -633,12 +651,12 @@ function PureMultimodalInput({
             `Uploading ${imageFiles[0].name}...`,
             "Processing image content...",
             "Extracting visual information...",
-            "Preparing for analysis..."
+            "Preparing for analysis...",
           ];
 
           for (let i = 0; i < imageSteps.length; i++) {
             setProcessingStep(imageSteps[i]);
-            await new Promise(resolve => setTimeout(resolve, 1200));
+            await new Promise((resolve) => setTimeout(resolve, 1200));
           }
 
           const uploadPromises = imageFiles.map((file) => uploadFile(file));
@@ -708,17 +726,45 @@ function PureMultimodalInput({
     [handleFileChange]
   );
 
+  // Extract documentId from messages if not provided
+  const extractedDocumentId =
+    documentIds?.[0] ||
+    (() => {
+      for (const msg of messages) {
+        if (msg.parts) {
+          for (const part of msg.parts) {
+            if (part.type === "data-pdfUpload" && "data" in part) {
+              const data = part.data as { documentId?: string };
+              return data.documentId;
+            }
+          }
+        }
+      }
+    })();
+
+  // Debug: log to see what's happening
+  if (typeof window !== "undefined") {
+    console.log("SuggestedActions render check:", {
+      messagesLength: messages.length,
+      attachmentsLength: attachments.length,
+      uploadQueueLength: uploadQueue.length,
+      documentIds,
+      extractedDocumentId,
+    });
+  }
+
   return (
     <div className={cn("relative flex w-full flex-col gap-4", className)}>
-      {messages.length === 0 &&
+      {messages.length > 0 &&
         attachments.length === 0 &&
-        uploadQueue.length === 0 &&
-        // <SuggestedActions
-        //   chatId={chatId}
-        //   selectedVisibilityType={selectedVisibilityType}
-        //   sendMessage={sendMessage}
-        // />
-        null}
+        uploadQueue.length === 0 && (
+          <SuggestedActions
+            chatId={chatId}
+            documentId={extractedDocumentId}
+            selectedVisibilityType={selectedVisibilityType}
+            sendMessage={sendMessage}
+          />
+        )}
 
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-blue-500 border-dashed bg-blue-50/80 dark:bg-blue-950/80">
@@ -792,12 +838,14 @@ function PureMultimodalInput({
         )}
         {/* Loading indicator when processing */}
         {isProcessingAttachments && (
-          <div className="mb-2 flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+          <div className="mb-2 flex items-center gap-2 text-blue-600 text-sm dark:text-blue-400">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent dark:border-blue-400" />
-            <span className="font-medium">{processingStep || "Processing your file..."}</span>
+            <span className="font-medium">
+              {processingStep || "Processing your file..."}
+            </span>
           </div>
         )}
-        
+
         <div className="flex flex-row items-start gap-1 sm:gap-2">
           <PromptInputTextarea
             autoFocus
@@ -891,6 +939,12 @@ export const MultimodalInput = memo(
       return false;
     }
     if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+      return false;
+    }
+    if (
+      JSON.stringify(prevProps.documentIds) !==
+      JSON.stringify(nextProps.documentIds)
+    ) {
       return false;
     }
 

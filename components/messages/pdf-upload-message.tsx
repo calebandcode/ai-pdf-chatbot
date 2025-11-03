@@ -1,22 +1,25 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BookOpen, FileText, Sparkles } from "lucide-react";
+import { FileText, Sparkles } from "lucide-react";
 import { useState } from "react";
 import {
   ContextualChatModal,
   type SelectionContext,
 } from "@/components/contextual-chat-modal";
+import { MagnifyingGlass } from "@/components/magnifying-glass";
+import { NoteManager } from "@/components/note-manager";
 import {
   createPDFSuggestionActions,
   type PDFSuggestionAction,
   PDFSuggestions,
 } from "@/components/pdf-suggestions";
 import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
+import { ReadingControlsBar } from "@/components/reading-controls-bar";
 import { TextSelectionBubble } from "@/components/text-selection-bubble";
 import { TipsCollection } from "@/components/tips-collection";
 import { TopicOutline } from "@/components/topic-outline";
-import { Button } from "@/components/ui/button";
+import { useFont } from "@/contexts/font-context";
 import { usePDFActions } from "@/hooks/use-pdf-actions";
 import { useTips } from "@/hooks/use-tips";
 import { cn } from "@/lib/utils";
@@ -68,17 +71,12 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
   const [quizSource, setQuizSource] = useState<string | undefined>();
   const [chatContext, setChatContext] = useState<SelectionContext | null>(null);
 
-  const { tips, addTip, deleteTip } = useTips();
+  const { tips, deleteTip } = useTips();
+  const { fontFamily, fontSize } = useFont();
 
   // Text selection handlers
-  const handleHighlight = (_text: string, _range: Range) => {
-    console.log("Highlighting text:", _text);
+  const handleHighlight = () => {
     // The highlighting is already handled in the TextSelectionBubble component
-  };
-
-  const handleSaveTip = (text: string, source?: string) => {
-    addTip(text, source);
-    console.log("Tip saved:", { text, source });
   };
 
   const handleQuizMe = (text: string) => {
@@ -87,20 +85,13 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     setShowQuizModal(true);
   };
 
-  const handleAddNote = (text: string) => {
-    const note = prompt("Add a note for this text:", "");
-    if (note) {
-      addTip(text, documentTitle, note);
-    }
-  };
-
   const handleQuizFromTip = (text: string) => {
     setSelectedText(text);
     setQuizSource("Saved Tip");
     setShowQuizModal(true);
   };
 
-  const handleAskAboutThis = (text: string, context: SelectionContext) => {
+  const handleAskAboutThis = (_text: string, context: SelectionContext) => {
     setChatContext(context);
     setShowContextualChat(true);
   };
@@ -135,8 +126,21 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className={cn("flex flex-col gap-4", className)}
+      className={cn("flex flex-col gap-4 transition-all", className)}
       initial={{ opacity: 0, y: 20 }}
+      style={{
+        fontSize: `${fontSize}px`,
+        fontFamily:
+          fontFamily === "inter"
+            ? '"Inter", sans-serif'
+            : fontFamily === "merriweather"
+              ? '"Merriweather", serif'
+              : fontFamily === "lora"
+                ? '"Lora", serif'
+                : fontFamily === "manrope"
+                  ? '"Manrope", sans-serif'
+                  : '"Roboto Mono", monospace',
+      }}
       transition={{ duration: 0.5 }}
     >
       {/* Header with document info */}
@@ -182,33 +186,29 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         <PDFSuggestions actions={suggestionActions} />
       </div>
 
-      {/* Floating Tips Button */}
-      {tips.length > 0 && (
-        <motion.div
-          animate={{ opacity: 1, scale: 1 }}
-          className="fixed right-4 bottom-20 z-40"
-          initial={{ opacity: 0, scale: 0.8 }}
-        >
-          <Button
-            className="rounded-full shadow-lg transition-all duration-200 hover:shadow-xl"
-            onClick={() => setShowTipsCollection(true)}
-            size="sm"
-          >
-            <BookOpen className="mr-2 h-4 w-4" />
-            My Tips ({tips.length})
-          </Button>
-        </motion.div>
-      )}
-
-      {/* Text Selection Features */}
-      <TextSelectionBubble
-        onAddNote={handleAddNote}
-        onAskAboutThis={handleAskAboutThis}
-        onHighlight={handleHighlight}
-        onQuizMe={handleQuizMe}
-        onSaveTip={handleSaveTip}
-        source={documentTitle}
+      {/* Reading Controls Bar */}
+      <ReadingControlsBar
+        onTipsClick={() => setShowTipsCollection(true)}
+        tipsCount={tips.length}
       />
+
+      {/* Magnifying Glass */}
+      <MagnifyingGlass />
+
+      {/* Note Manager - wraps components that need note functionality */}
+      <NoteManager source={documentTitle}>
+        {(requestNote) => (
+          <TextSelectionBubble
+            onAddNote={(text, range, position) => {
+              requestNote(text, range, position);
+            }}
+            onAskAboutThis={handleAskAboutThis}
+            onHighlight={handleHighlight}
+            onQuizMe={handleQuizMe}
+            source={documentTitle}
+          />
+        )}
+      </NoteManager>
 
       {/* Tips Collection Modal */}
       <TipsCollection
