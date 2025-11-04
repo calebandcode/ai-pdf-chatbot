@@ -43,6 +43,29 @@ const QuizResultSchema = z.object({
   }),
 });
 
+function buildAggregatedTopics(context: DocumentQuizContext): string {
+  // Sample topics for large documents to keep prompt compact
+  const topics = [...context.allTopics];
+  const MAX_TOPICS = 8;
+  const sampled = topics.length > MAX_TOPICS
+    ? topics
+        .slice()
+        .sort(() => 0.5 - Math.random())
+        .slice(0, MAX_TOPICS)
+    : topics;
+
+  const clamp = (text: string, max = 400) =>
+    text.length > max ? `${text.slice(0, max)}...` : text;
+
+  return sampled
+    .map((t) => {
+      const title = t.topic;
+      const summary = clamp(t.description || "");
+      return `Topic: ${title}\nSummary: ${summary}`;
+    })
+    .join("\n\n");
+}
+
 function buildQuizPrompt(context: QuizContext): string {
   const basePrompt = `You are an expert AI study tutor creating contextual quiz questions. Your goal is to generate questions that test understanding of the specific content provided, not generic questions.
 
@@ -105,22 +128,34 @@ Generate ${context.questionCount} comprehensive questions about "${context.topic
 
 CRITICAL: Base your questions ONLY on the content shown above. Do not create generic questions about ${context.topicName} - use the actual content provided.`;
 
-    case "document":
-      return `${basePrompt}
+    case "document": {
+      const docCtx = context as DocumentQuizContext;
+      const aggregated = buildAggregatedTopics(docCtx);
+      return `You are an intelligent quiz generator. Create a comprehensive multiple-choice quiz that evaluates understanding of the key concepts covered below.
 
-CONTEXT: Document Quiz
-- Document: "${context.documentTitle}"
-- Pages: ${context.allPages.join(", ")}
-- Question Count: ${context.questionCount}
-- Difficulty: ${context.difficulty}
+Document: "${docCtx.documentTitle}"
+Question Count: ${docCtx.questionCount}
+Difficulty: ${docCtx.difficulty}
 
-TOPICS COVERED:
-${context.allTopics.map(t => `- ${t.topic} (pages ${t.pages.join(", ")})`).join("\n")}
+Context (aggregated topics):
+${aggregated}
 
-DOCUMENT SUMMARY:
-${context.documentSummary}
+Instructions:
+1. Generate ${docCtx.questionCount} conceptual questions spanning the breadth of topics.
+2. Focus on understanding, not structure or page references.
+3. Mix question types: definitions, comparisons, practical applications, conceptual understanding.
+4. Provide exactly 4 answer choices (A, B, C, D) and clearly indicate the correct one.
+5. Avoid phrases like "on page", "in this section", or similar structural cues.
+6. Generate ALL text in the SAME LANGUAGE as the context.
 
-Generate ${context.questionCount} comprehensive questions about "${context.documentTitle}". Questions should test overall mastery of the document content across all topics.`;
+Example format:
+Q1. <question>
+A) <option>
+B) <option>
+C) <option>
+D) <option>
+Answer: <A|B|C|D>`;
+    }
 
     default:
       throw new Error(`Unsupported quiz scope: ${(context as any).scope}`);
@@ -193,27 +228,10 @@ export async function generateUnifiedQuiz(context: QuizContext): Promise<QuizRes
         rawContent = ctx.rawContent;
       }
     } else if (context.scope === "document") {
+      // For full-document quizzes, prefer aggregated semantic topic context over raw page chunks
       const ctx = context as DocumentQuizContext;
-      console.log("🔍 Fetching chunks for document:", {
-        documentId: context.documentIds[0],
-        allPages: ctx.allPages,
-      });
-      const chunks = await getDocumentChunks({ documentId: context.documentIds[0] });
-      console.log("🔍 Retrieved chunks:", {
-        totalChunks: chunks.length,
-        chunkPages: chunks.map(c => c.page),
-        firstChunkContent: chunks[0]?.content?.slice(0, 100) + "...",
-      });
-      const relevantChunks = chunks.filter(chunk => 
-        ctx.allPages.includes(chunk.page)
-      );
-      console.log("🔍 Relevant chunks for document:", {
-        relevantChunksCount: relevantChunks.length,
-        relevantPages: relevantChunks.map(c => c.page),
-      });
-      rawContent = relevantChunks
-        .map(chunk => `Page ${chunk.page}: ${chunk.content}`)
-        .join("\n\n");
+      const aggregated = buildAggregatedTopics(ctx);
+      rawContent = aggregated;
     }
 
     // Update context with raw content
