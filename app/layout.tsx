@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
+import { FontProvider } from "@/contexts/font-context";
 
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
@@ -29,23 +30,15 @@ const geistMono = Geist_Mono({
 });
 
 const LIGHT_THEME_COLOR = "hsl(0 0% 100%)";
-const DARK_THEME_COLOR = "hsl(240deg 10% 3.92%)";
 const THEME_COLOR_SCRIPT = `\
 (function() {
-  var html = document.documentElement;
   var meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) {
     meta = document.createElement('meta');
     meta.setAttribute('name', 'theme-color');
     document.head.appendChild(meta);
   }
-  function updateThemeColor() {
-    var isDark = html.classList.contains('dark');
-    meta.setAttribute('content', isDark ? '${DARK_THEME_COLOR}' : '${LIGHT_THEME_COLOR}');
-  }
-  var observer = new MutationObserver(updateThemeColor);
-  observer.observe(html, { attributes: true, attributeFilter: ['class'] });
-  updateThemeColor();
+  meta.setAttribute('content', '${LIGHT_THEME_COLOR}');
 })();`;
 
 export default function RootLayout({
@@ -70,16 +63,23 @@ export default function RootLayout({
             __html: THEME_COLOR_SCRIPT,
           }}
         />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:wght@300;400;700&family=Lora:wght@400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=Roboto+Mono:wght@300;400;500;600&display=swap"
+          rel="stylesheet"
+        />
       </head>
       <body className="antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="light"
           disableTransitionOnChange
-          enableSystem
+          enableSystem={false}
+          forcedTheme="light"
         >
-          <Toaster position="top-center" />
-          <SessionProvider>{children}</SessionProvider>
+          <FontProvider>
+            <Toaster position="top-center" />
+            <SessionProvider>{children}</SessionProvider>
+          </FontProvider>
         </ThemeProvider>
       </body>
     </html>

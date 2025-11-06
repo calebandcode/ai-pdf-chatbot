@@ -1,8 +1,15 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, ChevronRight, Copy, HelpCircle, Save } from "lucide-react";
-import { useState } from "react";
+import {
+  BookOpen,
+  ChevronRight,
+  Copy,
+  HelpCircle,
+  MessageCircle,
+  Save,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   generateSubtopicExplanationAction,
@@ -10,24 +17,31 @@ import {
 } from "@/app/actions/generate-explanations";
 import { generateUnifiedQuiz } from "@/app/actions/generate-unified-quiz";
 import { startGuidedSession } from "@/app/actions/tutor-session";
+import { ContextualChatModal } from "@/components/contextual-chat-modal";
 import { Response } from "@/components/elements/response";
 import { Suggestion } from "@/components/elements/suggestion";
 import { FloatingBubble } from "@/components/floating-bubble";
+import { SkeletonBlock } from "@/components/loading/skeleton-loaders";
+import { NoteManager } from "@/components/note-manager";
 import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
 import { TextSelectionBubble } from "@/components/text-selection-bubble";
 import { TipsCollection } from "@/components/tips-collection";
 import { useBubble } from "@/hooks/use-bubble";
 import { useTips } from "@/hooks/use-tips";
-import type { SubtopicQuizContext, TopicQuizContext } from "@/lib/types/quiz";
+import type {
+  DocumentQuizContext,
+  SubtopicQuizContext,
+  TopicQuizContext,
+} from "@/lib/types/quiz";
 import { sanitizeText } from "@/lib/utils";
 
 // Loading skeleton component
 const LoadingSkeleton = () => (
-  <div className="space-y-3">
-    <div className="h-4 animate-pulse rounded bg-gray-200" />
-    <div className="h-4 w-3/4 animate-pulse rounded bg-gray-200" />
-    <div className="h-4 w-1/2 animate-pulse rounded bg-gray-200" />
-  </div>
+  <SkeletonBlock
+    className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
+    lines={3}
+    variant="text"
+  />
 );
 
 type Topic = {
@@ -59,6 +73,9 @@ export function TopicOutline({
   const [subtopicContent, setSubtopicContent] = useState<
     Record<string, string>
   >({});
+  const [streamedContent, setStreamedContent] = useState<Set<string>>(
+    new Set()
+  );
   const [conversationContext, setConversationContext] = useState({
     topicsCovered: [] as string[],
     currentIndex: 0,
@@ -70,21 +87,98 @@ export function TopicOutline({
   const [selectedText, setSelectedText] = useState("");
   const [quizSource, setQuizSource] = useState<string | undefined>();
 
-  const { tips, addTip, deleteTip } = useTips();
+  // Topic chat features
+  const [showTopicChat, setShowTopicChat] = useState(false);
+  const [topicChatContext, setTopicChatContext] = useState<{
+    type: "topic" | "subtopic";
+    name: string;
+    description: string;
+    pages: number[];
+    parentTopic?: string;
+    clickPosition?: {
+      x: number;
+      y: number;
+    };
+  } | null>(null);
+
+  // Store topic conversations
+  const [topicConversations, setTopicConversations] = useState<
+    Record<
+      string,
+      Array<{
+        id: string;
+        question: string;
+        answer: string;
+        timestamp: Date;
+      }>
+    >
+  >({});
+
+  const { tips, deleteTip } = useTips();
 
   // Bubble system
   const { isOpen, bubbleData, position, bubbleRef, openBubble, closeBubble } =
     useBubble();
 
+  // Open a whole-document quiz bubble when requested externally
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      try {
+        const { detail } = e as CustomEvent<{
+          documentIds: string[];
+          chatId: string;
+        }>;
+        const docIds = detail?.documentIds?.length
+          ? detail.documentIds
+          : documentIds;
+
+        const allPages = Array.from(
+          new Set((topics || []).flatMap((t) => t.pages || []))
+        ).sort((a, b) => a - b);
+
+        const context: DocumentQuizContext = {
+          scope: "document",
+          documentIds: docIds,
+          chatId,
+          documentTitle: documentTitle || "Document",
+          allPages,
+          allTopics: topics || [],
+          documentSummary: "",
+          questionCount: 8,
+          difficulty: "mixed",
+        };
+
+        const quizResult = await generateUnifiedQuiz(context);
+
+        openBubble({
+          type: "quiz",
+          title: quizResult.title,
+          content: {
+            questions: quizResult.questions,
+            quizId: quizResult.quizId,
+            title: quizResult.title,
+          },
+          sourceElement: document.body as unknown as HTMLElement,
+        });
+      } catch (error) {
+        console.error("Error generating document quiz:", error);
+        toast.error("Failed to generate practice quiz. Please try again.");
+      }
+    };
+
+    window.addEventListener("open-document-quiz", handler as EventListener);
+    return () => {
+      window.removeEventListener(
+        "open-document-quiz",
+        handler as EventListener
+      );
+    };
+  }, [chatId, documentIds, documentTitle, openBubble, topics]);
+
   // Text selection handlers
   const handleHighlight = (_text: string, _range: Range) => {
     console.log("Highlighting text:", _text);
     // The highlighting is already handled in the TextSelectionBubble component
-  };
-
-  const handleSaveTip = (text: string, source?: string) => {
-    addTip(text, source);
-    console.log("Tip saved:", { text, source });
   };
 
   const handleQuizMe = (text: string) => {
@@ -93,17 +187,76 @@ export function TopicOutline({
     setShowQuizModal(true);
   };
 
-  const handleAddNote = (text: string) => {
-    const note = prompt("Add a note for this text:", "");
-    if (note) {
-      addTip(text, documentTitle || "Topic Outline", note);
-    }
-  };
-
   const handleQuizFromTip = (text: string) => {
     setSelectedText(text);
     setQuizSource("Saved Tip");
     setShowQuizModal(true);
+  };
+
+  const handleAskAboutTopic = (
+    event: React.MouseEvent,
+    topic: string,
+    description: string,
+    pages: number[]
+  ) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTopicChatContext({
+      type: "topic",
+      name: topic,
+      description,
+      pages,
+      clickPosition: {
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 8,
+      },
+    });
+    setShowTopicChat(true);
+  };
+
+  const handleAskAboutSubtopic = (
+    event: React.MouseEvent,
+    subtopic: string,
+    description: string,
+    pages: number[],
+    parentTopic: string
+  ) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTopicChatContext({
+      type: "subtopic",
+      name: subtopic,
+      description,
+      pages,
+      parentTopic,
+      clickPosition: {
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 8,
+      },
+    });
+    setShowTopicChat(true);
+  };
+
+  const handleSaveConversation = (conversation: {
+    id: string;
+    question: string;
+    answer: string;
+    timestamp: Date;
+  }) => {
+    if (!topicChatContext) return;
+
+    const topicKey = getTopicKey(topicChatContext);
+    setTopicConversations((prev) => ({
+      ...prev,
+      [topicKey]: [...(prev[topicKey] || []), conversation],
+    }));
+  };
+
+  const getTopicKey = (context: typeof topicChatContext) => {
+    if (!context) return "";
+    return context.type === "subtopic"
+      ? `${context.parentTopic}-${context.name}`
+      : context.name;
   };
 
   const handleQuizBubble = async (
@@ -371,6 +524,9 @@ export function TopicOutline({
         [topicName]: result.explanation,
       }));
 
+      // Mark as newly generated for streaming animation
+      setStreamedContent((prev) => new Set(prev).add(`topic-${topicName}`));
+
       // Update conversation context
       setConversationContext((prev) => ({
         topicsCovered: [...prev.topicsCovered, topicName],
@@ -442,6 +598,11 @@ export function TopicOutline({
         ...prev,
         [subtopicName]: result.explanation,
       }));
+
+      // Mark as streamed for first-time animation
+      setStreamedContent((prev) =>
+        new Set(prev).add(`subtopic-${subtopicName}`)
+      );
 
       // Update conversation context for subtopics
       setConversationContext((prev) => ({
@@ -640,6 +801,7 @@ export function TopicOutline({
                         onClick={(e) =>
                           handleLearnMoreBubble(e, topic.topic, topic.pages)
                         }
+                        title="Learn more"
                         type="button"
                       >
                         <HelpCircle className="h-4 w-4" />
@@ -705,9 +867,47 @@ export function TopicOutline({
                         <LoadingSkeleton />
                       ) : topicContent[topic.topic] ? (
                         <div className="mb-4">
-                          <Response>
+                          <Response
+                            isStreaming={streamedContent.has(
+                              `topic-${topic.topic}`
+                            )}
+                            onComplete={() => {
+                              // Mark as no longer streaming after animation completes
+                              setStreamedContent((prev) => {
+                                const newSet = new Set(prev);
+                                newSet.delete(`topic-${topic.topic}`);
+                                return newSet;
+                              });
+                            }}
+                            speed={20}
+                          >
                             {sanitizeText(topicContent[topic.topic])}
                           </Response>
+
+                          {/* Ask about this topic button - appears after content is generated */}
+                          <div className="mt-3 flex justify-start">
+                            <motion.div
+                              animate={{ opacity: 1, y: 0 }}
+                              initial={{ opacity: 0, y: 10 }}
+                              transition={{ duration: 0.2, delay: 0.1 }}
+                            >
+                              <button
+                                className="mb-3.5 flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-gray-700 text-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
+                                onClick={(e) =>
+                                  handleAskAboutTopic(
+                                    e,
+                                    topic.topic,
+                                    topic.description,
+                                    topic.pages
+                                  )
+                                }
+                                type="button"
+                              >
+                                <MessageCircle className="h-4 w-4 text-gray-600" />
+                                <span>Ask Questions</span>
+                              </button>
+                            </motion.div>
+                          </div>
                         </div>
                       ) : (
                         <p className="mb-3 text-gray-500 text-sm">
@@ -720,7 +920,7 @@ export function TopicOutline({
                     {isExpanded && hasSubtopics && (
                       <motion.div
                         animate={{ opacity: 1, y: 0 }}
-                        className="ml-4"
+                        className="mt-5 ml-4"
                         initial={{ opacity: 0, y: -5 }}
                         transition={{ duration: 0.3 }}
                       >
@@ -843,7 +1043,22 @@ export function TopicOutline({
                                       </div>
                                     ) : subtopicContent[subtopic.subtopic] ? (
                                       <div className="mb-3">
-                                        <Response>
+                                        <Response
+                                          isStreaming={streamedContent.has(
+                                            `subtopic-${subtopic.subtopic}`
+                                          )}
+                                          onComplete={() => {
+                                            // Mark as no longer streaming after animation completes
+                                            setStreamedContent((prev) => {
+                                              const newSet = new Set(prev);
+                                              newSet.delete(
+                                                `subtopic-${subtopic.subtopic}`
+                                              );
+                                              return newSet;
+                                            });
+                                          }}
+                                          speed={20}
+                                        >
                                           {sanitizeText(
                                             subtopicContent[subtopic.subtopic]
                                           )}
@@ -879,9 +1094,33 @@ export function TopicOutline({
                                   {/* Action Buttons - Natural Positioning */}
                                   {subtopicContent[subtopic.subtopic] && (
                                     <div className="flex items-center justify-between">
-                                      {/* Left side - empty for now */}
+                                      {/* Left side - Ask about this subtopic */}
                                       <div className="flex gap-2">
-                                        {/* No left actions for subtopics */}
+                                        <motion.div
+                                          animate={{ opacity: 1, y: 0 }}
+                                          initial={{ opacity: 0, y: 10 }}
+                                          transition={{
+                                            duration: 0.2,
+                                            delay: 0.1,
+                                          }}
+                                        >
+                                          <button
+                                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-700 text-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
+                                            onClick={(e) =>
+                                              handleAskAboutSubtopic(
+                                                e,
+                                                subtopic.subtopic,
+                                                subtopic.subtopic, // Using subtopic name as description for now
+                                                subtopic.pages,
+                                                topic.topic
+                                              )
+                                            }
+                                            type="button"
+                                          >
+                                            <MessageCircle className="h-4 w-4 text-blue-600" />
+                                            <span>Ask about this subtopic</span>
+                                          </button>
+                                        </motion.div>
                                       </div>
 
                                       {/* Right side - Quiz */}
@@ -940,14 +1179,19 @@ export function TopicOutline({
         ref={bubbleRef}
       />
 
-      {/* Text Selection Features */}
-      <TextSelectionBubble
-        onAddNote={handleAddNote}
-        onHighlight={handleHighlight}
-        onQuizMe={handleQuizMe}
-        onSaveTip={handleSaveTip}
-        source={documentTitle || "Topic Outline"}
-      />
+      {/* Note Manager - wraps components that need note functionality */}
+      <NoteManager source={documentTitle || "Topic Outline"}>
+        {(requestNote) => (
+          <TextSelectionBubble
+            onAddNote={(text, range, position) => {
+              requestNote(text, range, position);
+            }}
+            onHighlight={handleHighlight}
+            onQuizMe={handleQuizMe}
+            source={documentTitle || "Topic Outline"}
+          />
+        )}
+      </NoteManager>
 
       {/* Tips Collection Modal */}
       <TipsCollection
@@ -965,6 +1209,34 @@ export function TopicOutline({
         selectedText={selectedText}
         source={quizSource}
       />
+
+      {/* Topic Chat Modal */}
+      {topicChatContext && (
+        <ContextualChatModal
+          clickPosition={topicChatContext.clickPosition}
+          context={{
+            selectedText: topicChatContext.name,
+            surroundingContext: topicChatContext.description,
+            sourceTitle:
+              topicChatContext.type === "subtopic"
+                ? `${topicChatContext.parentTopic} - ${topicChatContext.name}`
+                : topicChatContext.name,
+            sourceType: "text",
+            sourceId: `${topicChatContext.type}-${topicChatContext.name}`,
+          }}
+          isOpen={showTopicChat}
+          onClose={() => {
+            setShowTopicChat(false);
+            setTopicChatContext(null);
+          }}
+          onSaveConversation={handleSaveConversation}
+          previousQuestions={
+            topicConversations[getTopicKey(topicChatContext)]?.map(
+              (conv) => conv.question
+            ) || []
+          }
+        />
+      )}
     </div>
   );
 }

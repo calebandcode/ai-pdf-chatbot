@@ -54,7 +54,7 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
 
   if (showResults) {
     return (
-      <div className="space-y-4 max-h-full flex flex-col">
+      <div className="flex h-full flex-col space-y-4 p-4">
         <div className="text-center flex-shrink-0">
           <div className="mb-4">
             <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
@@ -71,7 +71,7 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-3">
+        <div className="mb-4 flex min-h-0 flex-1 flex-col space-y-3 overflow-y-auto hide-scrollbar">
           {data.questions.map((question, index) => {
             const userAnswer = selectedAnswers[question.id];
             const isCorrect = userAnswer === question.correct;
@@ -128,9 +128,9 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
   }
 
   return (
-    <div className="space-y-4 max-h-full flex flex-col">
+    <div className="flex h-full flex-col p-4">
       {/* Progress indicator */}
-      <div className="flex items-center justify-between flex-shrink-0">
+      <div className="mb-4 flex flex-shrink-0 items-center justify-between">
         <span className="text-gray-600 text-sm">
           Question {currentQuestionIndex + 1} of {data.questions.length}
         </span>
@@ -146,8 +146,8 @@ export function QuizBubble({ data, onClose }: QuizBubbleProps) {
         </div>
       </div>
 
-      {/* Question - scrollable area */}
-      <div className="flex-1 overflow-y-auto space-y-4">
+      {/* Question - scrollable area (hidden scrollbar) */}
+      <div className="mb-4 flex min-h-0 flex-1 flex-col overflow-y-auto hide-scrollbar">
         {/* Question */}
         <div>
           <h4 className="mb-3 font-medium text-gray-800 text-sm leading-relaxed">

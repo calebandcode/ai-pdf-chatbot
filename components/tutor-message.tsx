@@ -1,8 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BookOpen, GraduationCap, MessageSquare } from "lucide-react";
+import { BookOpen, FileText, GraduationCap, MessageSquare } from "lucide-react";
 import type { TutorSessionState } from "@/app/actions/tutor-session";
+import { Response } from "@/components/elements/response";
 import { TutorCommands } from "@/components/tutor-commands";
 import { TutorSessionIndicator } from "@/components/tutor-session-indicator";
 import { useTutorSession } from "@/hooks/use-tutor-session";
@@ -57,15 +58,15 @@ export function TutorMessage({
   const getMessageTitle = () => {
     switch (metadata?.type) {
       case "tutor_explanation":
-        return "📚 Learning Session";
+        return "Learning Session";
       case "tutor_quiz":
-        return "🧠 Quiz Time";
+        return "Quiz Time";
       case "tutor_command_response":
-        return "💬 Tutor Response";
+        return "Tutor Response";
       case "tutor_resume":
-        return "🎓 Welcome Back";
+        return "Welcome Back";
       default:
-        return "📚 Tutor Message";
+        return "Tutor Message";
     }
   };
 
@@ -123,14 +124,15 @@ export function TutorMessage({
             </div>
 
             <div className="prose prose-sm max-w-none">
-              <p className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+              <Response isStreaming={false} speed={20}>
                 {content}
-              </p>
+              </Response>
             </div>
 
             {metadata?.pages && metadata.pages.length > 0 && (
               <div className="mt-3 text-muted-foreground text-sm">
-                📄 Pages: {metadata.pages.join(", ")}
+                <FileText className="mr-1 h-4 w-4" /> Pages:{" "}
+                {metadata.pages.join(", ")}
               </div>
             )}
           </div>

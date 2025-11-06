@@ -2,6 +2,61 @@ export type QuizScope = "subtopic" | "topic" | "document";
 
 export type QuizDifficulty = "easy" | "medium" | "hard" | "mixed" | "easy-medium";
 
+export type DocumentQuizConfig = {
+  version: number;
+  sampling: {
+    periodicInterval: number;
+    maxSamples: number;
+    diversityThreshold: number;
+    tokenBudget: number;
+    topicCoverage: boolean;
+    anchorPages: boolean;
+    minimumSnippets: number;
+  };
+  compression: {
+    maxSentences: number;
+    maxCharacters: number;
+    minSentenceLength: number;
+    maxSentenceLength: number;
+  };
+};
+
+export type SampledSnippet = {
+  page: number;
+  content: string;
+  reason: "anchor" | "periodic" | "topic" | "fallback";
+  approxTokens: number;
+};
+
+export type CompressedSummary = {
+  topicId: string;
+  title: string;
+  summary: string;
+  pages: number[];
+  kind: "topic" | "subtopic";
+  parentTopicId?: string;
+};
+
+export type DocumentQuizDiagnostics = {
+  approxTokenCount?: number;
+  snippetCount?: number;
+  coverageRatio?: number;
+  applicationRatio?: number;
+  structuralQuestionCount?: number;
+  redundantQuestionCount?: number;
+  literalQuestionCount?: number;
+  intentCounts?: {
+    scenario: number;
+    conceptual: number;
+    recall: number;
+  };
+  dropCounts?: {
+    structural: number;
+    redundant: number;
+    literal: number;
+  };
+};
+
 export interface BaseQuizContext {
   scope: QuizScope;
   questionCount: number;
@@ -43,10 +98,20 @@ export interface DocumentQuizContext extends BaseQuizContext {
     topic: string;
     description: string;
     pages: number[];
+    subtopics?: Array<{
+      subtopic: string;
+      pages: number[];
+    }>;
   }>;
   allPages: number[];
   documentSummary: string;
   userPerformance?: UserQuizPerformance[];
+  schemaVersion?: number;
+  sampledSnippets?: SampledSnippet[];
+  compressedSummaries?: CompressedSummary[];
+  generationConfig?: DocumentQuizConfig;
+  diagnostics?: DocumentQuizDiagnostics;
+  rawContent?: string;
 }
 
 export type QuizContext = SubtopicQuizContext | TopicQuizContext | DocumentQuizContext;
@@ -75,6 +140,8 @@ export interface QuizQuestion {
   explanation: string;
   difficulty: QuizDifficulty;
   sourcePages: number[];
+  type?: "multiple_choice" | "scenario" | "short_answer";
+  topicId?: string;
 }
 
 export interface QuizResult {
@@ -83,4 +150,5 @@ export interface QuizResult {
   title: string;
   scope: QuizScope;
   context: QuizContext;
+  diagnostics?: DocumentQuizDiagnostics;
 }

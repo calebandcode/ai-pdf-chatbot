@@ -40,17 +40,7 @@ export const FloatingBubble = forwardRef<HTMLDivElement, FloatingBubbleProps>(
       <AnimatePresence>
         {isOpen && (
           <>
-            {/* Background blur overlay - only for the specific section */}
-            <motion.div
-              animate={{ opacity: 1 }}
-              className="fixed inset-0 z-40 bg-black/10 backdrop-blur-sm"
-              exit={{ opacity: 0 }}
-              initial={{ opacity: 0 }}
-              onClick={onClose}
-              transition={{ duration: 0.2 }}
-            />
-
-            {/* Floating bubble */}
+            {/* Floating bubble - non-blocking, no page overlay */}
             <motion.div
               animate={{
                 opacity: 1,
@@ -86,15 +76,15 @@ export const FloatingBubble = forwardRef<HTMLDivElement, FloatingBubbleProps>(
             >
               {/* Bubble container */}
               <div className="relative h-full w-full">
-                {/* Main content card */}
-                <div className="relative h-full w-full overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+                {/* Main content card - solid background */}
+                <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
                   {/* Header */}
-                  <div className="flex items-center justify-between border-gray-100 border-b bg-gray-50/50 px-4 py-3">
-                    <h3 className="font-semibold text-gray-800 text-sm">
+                  <div className="flex flex-shrink-0 items-center justify-between border-gray-200 border-b bg-gray-50 px-4 py-3">
+                    <h3 className="font-semibold text-sm text-gray-900">
                       {bubbleData.title}
                     </h3>
                     <button
-                      className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-700"
+                      className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-600 transition-colors hover:bg-gray-200 hover:text-gray-900"
                       onClick={onClose}
                       type="button"
                     >
@@ -102,10 +92,16 @@ export const FloatingBubble = forwardRef<HTMLDivElement, FloatingBubbleProps>(
                     </button>
                   </div>
 
-                  {/* Content area */}
-                  <div className="h-full overflow-y-auto p-4">
-                    {renderContent()}
-                  </div>
+                  {/* Content area - quiz handles its own scrolling */}
+                  {bubbleData.type === "quiz" ? (
+                    <div className="flex min-h-0 flex-1 bg-white">
+                      {renderContent()}
+                    </div>
+                  ) : (
+                    <div className="flex min-h-0 flex-1 overflow-y-auto bg-white p-4">
+                      {renderContent()}
+                    </div>
+                  )}
                 </div>
 
                 {/* Subtle arrow pointing to source element */}

@@ -1,14 +1,10 @@
 "use client";
-
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { startChatQuiz } from "@/app/actions/chat-quiz";
 import { generateLessonFromDocument } from "@/app/actions/generate-lesson";
 import type { PDFSuggestionAction } from "@/components/pdf-suggestions";
 
 export function usePDFActions() {
-  const router = useRouter();
-
   const handlePDFAction = async (
     type: PDFSuggestionAction["type"],
     documentId: string,
@@ -32,8 +28,14 @@ export function usePDFActions() {
           break;
 
         case "generate_quiz":
-          // Generate a quiz artifact
-          router.push(`/quiz-generate?doc=${documentId}&chat=${chatId}`);
+          // Open non-blocking quiz bubble for the whole document
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("open-document-quiz", {
+                detail: { documentIds: [documentId], chatId },
+              })
+            );
+          }
           break;
 
         case "flashcards":
@@ -43,22 +45,6 @@ export function usePDFActions() {
           });
           toast.success("Flashcards generated! Check the artifacts panel.");
           break;
-
-        case "ask_questions": {
-          // Focus on input field for asking questions
-          // This will be handled by the UI component
-          const inputElement = document.querySelector(
-            'input[placeholder*="Ask"], textarea[placeholder*="Ask"]'
-          ) as HTMLInputElement;
-          if (inputElement) {
-            inputElement.focus();
-            inputElement.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          }
-          break;
-        }
 
         default:
           console.warn("Unknown PDF action type:", type);
