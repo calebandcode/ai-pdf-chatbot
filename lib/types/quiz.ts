@@ -43,6 +43,18 @@ export type DocumentQuizDiagnostics = {
   coverageRatio?: number;
   applicationRatio?: number;
   structuralQuestionCount?: number;
+  redundantQuestionCount?: number;
+  literalQuestionCount?: number;
+  intentCounts?: {
+    scenario: number;
+    conceptual: number;
+    recall: number;
+  };
+  dropCounts?: {
+    structural: number;
+    redundant: number;
+    literal: number;
+  };
 };
 
 export interface BaseQuizContext {

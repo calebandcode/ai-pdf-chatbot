@@ -66,6 +66,10 @@ const SCENARIO_REGEX =
   /\b(scenario|case|situation|project|client|patient|team|classroom|consider|suppose|imagine|you are|your company|if\s)\b/i;
 const BANNED_OPTION_REGEX = /\b(all of the above|none of the above)\b/i;
 const COVERAGE_TOKENIZER_REGEX = /[^a-z0-9]+/g;
+const MIN_PROMPT_TOKENS = 6;
+const REDUNDANCY_THRESHOLD = 0.7;
+const LITERAL_OVERLAP_THRESHOLD = 0.85;
+const LITERAL_MIN_TOKENS = 8;
 
 function buildAggregatedTopics(context: DocumentQuizContext): string {
   const topics = [...context.allTopics];
@@ -209,9 +213,10 @@ Question requirements:
 1. Cover at least three distinct top-level topics (or as many as available)
 2. >=40% of questions must be scenario-based or application-focused
 3. Remaining questions probe conceptual understanding, causal links, comparisons, or implications
-4. Each question must cite relevant page numbers when referencing specific content
-5. Distractors must be plausible, mutually exclusive, and reflect realistic misconceptions
-6. Absolutely no structural/navigation/meta questions
+4. Vary the real-world situations so no two questions feel like the same story
+5. Each question must cite relevant page numbers when referencing specific content
+6. Distractors must be plausible, mutually exclusive, and reflect realistic misconceptions
+7. Absolutely no structural/navigation/meta questions or verbatim restatements of a single sentence
 
 Validation checklist (self-verify before finalising):
 - [ ] Every question stems from the provided summaries/snippets
@@ -490,6 +495,12 @@ function mergeDiagnostics(
     applicationRatio: evaluation?.applicationRatio ?? existing?.applicationRatio,
     structuralQuestionCount:
       evaluation?.structuralQuestionCount ?? existing?.structuralQuestionCount,
+    redundantQuestionCount:
+      evaluation?.redundantQuestionCount ?? existing?.redundantQuestionCount,
+    literalQuestionCount:
+      evaluation?.literalQuestionCount ?? existing?.literalQuestionCount,
+    intentCounts: evaluation?.intentCounts ?? existing?.intentCounts,
+    dropCounts: evaluation?.dropCounts ?? existing?.dropCounts,
   };
 }
 
@@ -510,6 +521,15 @@ function evaluateDocumentQuestions(
   const topicMatches = new Set<string>();
   let structuralCount = 0;
   let scenarioCount = 0;
+  let conceptualCount = 0;
+  let recallCount = 0;
+  let redundantDrops = 0;
+  let literalDrops = 0;
+
+  const snippetTokenSets = (context.sampledSnippets ?? []).map((snippet) =>
+    new Set(tokenize(snippet.content))
+  );
+  const acceptedTokenSets: Array<Set<string>> = [];
 
   const topicTokens = (context.allTopics || []).flatMap((topic) => {
     const tokens = [topic.topic, topic.description || ""]
@@ -546,6 +566,8 @@ function evaluateDocumentQuestions(
 
     const prompt = question.prompt || "";
     const explanation = question.explanation || "";
+    const promptTokens = tokenize(prompt);
+    const promptSet = new Set(promptTokens);
 
     fallback.push(normalizedQuestion);
 
@@ -560,12 +582,33 @@ function evaluateDocumentQuestions(
       continue;
     }
 
+    if (
+      promptTokens.length >= LITERAL_MIN_TOKENS &&
+      isOverlyLiteral(promptSet, snippetTokenSets)
+    ) {
+      literalDrops += 1;
+      continue;
+    }
+
+    if (isRedundantPrompt(promptSet, acceptedTokenSets)) {
+      redundantDrops += 1;
+      continue;
+    }
+
     const isScenario = detectScenarioQuestion(normalizedQuestion);
     if (isScenario) {
       scenarioCount += 1;
       normalizedQuestion.type = "scenario";
     } else if (!normalizedQuestion.type) {
       normalizedQuestion.type = "multiple_choice";
+    }
+
+    if (!isScenario) {
+      if (isConceptualPrompt(prompt)) {
+        conceptualCount += 1;
+      } else {
+        recallCount += 1;
+      }
     }
 
     const normalizedPromptText = sanitize(prompt);
@@ -576,6 +619,7 @@ function evaluateDocumentQuestions(
     });
 
     accepted.push(normalizedQuestion);
+    acceptedTokenSets.push(promptSet);
   }
 
   const coverageRatio =
@@ -594,6 +638,18 @@ function evaluateDocumentQuestions(
     structuralQuestionCount: structuralCount,
     coverageRatio,
     applicationRatio,
+    redundantQuestionCount: redundantDrops,
+    literalQuestionCount: literalDrops,
+    intentCounts: {
+      scenario: scenarioCount,
+      conceptual: conceptualCount,
+      recall: recallCount,
+    },
+    dropCounts: {
+      structural: structuralCount,
+      redundant: redundantDrops,
+      literal: literalDrops,
+    },
   };
 
   const regenReasons: string[] = [];
@@ -613,6 +669,10 @@ function evaluateDocumentQuestions(
   console.log("[quiz] document diagnostics:", {
     structuralCount,
     scenarioCount,
+    conceptualCount,
+    recallCount,
+    redundantDrops,
+    literalDrops,
     coverageRatio,
     applicationRatio,
     acceptedCount: accepted.length,
@@ -665,8 +725,76 @@ function detectScenarioQuestion(question: QuizQuestion): boolean {
   return SCENARIO_REGEX.test(prompt) || /\bif\b.+\?/i.test(prompt);
 }
 
+function tokenize(text: string): string[] {
+  return sanitize(text)
+    .split(" ")
+    .filter(Boolean);
+}
+
 function sanitize(text: string): string {
   return text.toLowerCase().replace(COVERAGE_TOKENIZER_REGEX, " ").trim();
+}
+
+function jaccardSimilarity(
+  a: Set<string>,
+  b: Set<string>
+): number {
+  if (a.size === 0 || b.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) {
+      intersection += 1;
+    }
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function isOverlyLiteral(
+  promptTokens: Set<string>,
+  snippetTokenSets: Array<Set<string>>
+): boolean {
+  if (promptTokens.size === 0 || snippetTokenSets.length === 0) {
+    return false;
+  }
+  for (const snippetTokens of snippetTokenSets) {
+    const similarity = jaccardSimilarity(promptTokens, snippetTokens);
+    if (similarity >= LITERAL_OVERLAP_THRESHOLD) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isRedundantPrompt(
+  promptTokens: Set<string>,
+  acceptedTokenSets: Array<Set<string>>
+): boolean {
+  if (promptTokens.size === 0) {
+    return false;
+  }
+  for (const existing of acceptedTokenSets) {
+    const similarity = jaccardSimilarity(promptTokens, existing);
+    if (similarity >= REDUNDANCY_THRESHOLD) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isConceptualPrompt(prompt: string): boolean {
+  const lowered = prompt.toLowerCase();
+  if (
+    /\b(why|how|impact|effect|consequence|result|compare|contrast|difference|improve|optimize|should|best|choose|recommend)\b/.test(
+      lowered
+    )
+  ) {
+    return true;
+  }
+  const tokens = tokenize(lowered);
+  return tokens.length >= Math.max(MIN_PROMPT_TOKENS, 10);
 }
 
 function getQuizTitle(context: QuizContext): string {
