@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
@@ -32,6 +32,10 @@ import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
+
+const dedupeDocIds = (ids: string[]): string[] => {
+  return Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
+};
 
 export function Chat({
   id,
@@ -66,20 +70,74 @@ export function Chat({
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
 
-  // Get documentIds from sessionStorage for this chat
-  const sessionDocIds = (() => {
-    if (typeof window !== "undefined") {
-      try {
-        return JSON.parse(sessionStorage.getItem(`chat-${id}-docIds`) || "[]");
-      } catch {
-        return [];
-      }
+  const [persistedDocIds, setPersistedDocIds] = useState<string[]>(() => {
+    const initialIds = dedupeDocIds(documentIds || []);
+    if (typeof window === "undefined") {
+      return initialIds;
     }
-    return [];
-  })();
+    try {
+      const storedRaw = window.sessionStorage.getItem(`chat-${id}-docIds`);
+      const storedIds = storedRaw ? JSON.parse(storedRaw) : [];
+      const merged = dedupeDocIds([...storedIds, ...initialIds]);
+      window.sessionStorage.setItem(
+        `chat-${id}-docIds`,
+        JSON.stringify(merged)
+      );
+      return merged;
+    } catch {
+      return initialIds;
+    }
+  });
 
-  // Combine initial documentIds with sessionStorage documentIds
-  const allDocumentIds = [...(documentIds || []), ...sessionDocIds];
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const storedRaw = window.sessionStorage.getItem(`chat-${id}-docIds`);
+      if (!storedRaw) {
+        return;
+      }
+      const storedIds: string[] = JSON.parse(storedRaw);
+      if (storedIds.length === 0) {
+        return;
+      }
+      setPersistedDocIds((prev) => {
+        const merged = dedupeDocIds([...prev, ...storedIds]);
+        if (merged.length !== prev.length) {
+          window.sessionStorage.setItem(
+            `chat-${id}-docIds`,
+            JSON.stringify(merged)
+          );
+        }
+        return merged;
+      });
+    } catch {
+      // ignore parse failures
+    }
+  }, [id]);
+
+  const documentIdsKey = useMemo(() => {
+    return (documentIds || []).join("|");
+  }, [documentIds]);
+
+  useEffect(() => {
+    if (!documentIds || documentIds.length === 0) {
+      return;
+    }
+    setPersistedDocIds((prev) => {
+      const merged = dedupeDocIds([...prev, ...documentIds]);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          `chat-${id}-docIds`,
+          JSON.stringify(merged)
+        );
+      }
+      return merged;
+    });
+  }, [documentIdsKey, id]);
+
+  const allDocumentIds = persistedDocIds;
 
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
@@ -237,6 +295,43 @@ export function Chat({
     resumeStream,
     setMessages,
   });
+
+  useEffect(() => {
+    if (!messages?.length) {
+      return;
+    }
+
+    const idsFromMessages = dedupeDocIds(
+      messages
+        .flatMap((msg) =>
+          msg.parts
+            ?.filter(
+              (part) =>
+                (part as { type?: string }).type === ("data-pdfUpload" as const)
+            )
+            .map(
+              (part) =>
+                (part as { data?: { documentId?: string } }).data?.documentId
+            ) ?? []
+        )
+        .filter((docId): docId is string => Boolean(docId))
+    );
+
+    if (idsFromMessages.length === 0) {
+      return;
+    }
+
+    setPersistedDocIds((prev) => {
+      const merged = dedupeDocIds([...prev, ...idsFromMessages]);
+      if (typeof window !== "undefined" && merged.length !== prev.length) {
+        window.sessionStorage.setItem(
+          `chat-${id}-docIds`,
+          JSON.stringify(merged)
+        );
+      }
+      return merged;
+    });
+  }, [id, messages]);
 
   return (
     <>

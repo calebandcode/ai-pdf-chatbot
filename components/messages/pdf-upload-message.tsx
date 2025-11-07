@@ -2,26 +2,22 @@
 
 import { motion } from "framer-motion";
 import { FileText, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ContextualChatModal,
   type SelectionContext,
 } from "@/components/contextual-chat-modal";
+import { DiscoveryPanel } from "@/components/discovery-panel";
 import { MagnifyingGlass } from "@/components/magnifying-glass";
 import { NoteManager } from "@/components/note-manager";
-import {
-  createPDFSuggestionActions,
-  type PDFSuggestionAction,
-  PDFSuggestions,
-} from "@/components/pdf-suggestions";
 import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
 import { ReadingControlsBar } from "@/components/reading-controls-bar";
 import { TextSelectionBubble } from "@/components/text-selection-bubble";
 import { TipsCollection } from "@/components/tips-collection";
 import { TopicOutline } from "@/components/topic-outline";
 import { useFont } from "@/contexts/font-context";
-import { usePDFActions } from "@/hooks/use-pdf-actions";
 import { useTips } from "@/hooks/use-tips";
+import type { DiscoveryResponse } from "@/lib/discovery/types";
 import { cn } from "@/lib/utils";
 
 type PDFUploadMessageData = {
@@ -39,11 +35,6 @@ type PDFUploadMessageData = {
   }>;
   documentId: string;
   chatId: string;
-  onAction?: (
-    type: PDFSuggestionAction["type"],
-    documentId: string,
-    chatId: string
-  ) => void;
 };
 
 type PDFUploadMessageProps = {
@@ -59,10 +50,7 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     mainTopics,
     documentId,
     chatId,
-    onAction,
   } = data;
-  const { handlePDFAction } = usePDFActions();
-
   // Text selection features
   const [showTipsCollection, setShowTipsCollection] = useState(false);
   const [showQuizModal, setShowQuizModal] = useState(false);
@@ -70,6 +58,14 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
   const [selectedText, setSelectedText] = useState("");
   const [quizSource, setQuizSource] = useState<string | undefined>();
   const [chatContext, setChatContext] = useState<SelectionContext | null>(null);
+  const [discoveryState, setDiscoveryState] = useState<{
+    status: "idle" | "loading" | "success" | "error";
+    data: DiscoveryResponse | null;
+  }>({
+    status: "idle",
+    data: null,
+  });
+  const hasFetchedDiscoveryRef = useRef(false);
 
   const { tips, deleteTip } = useTips();
   const { fontFamily, fontSize } = useFont();
@@ -91,6 +87,61 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     setShowQuizModal(true);
   };
 
+  const fetchDiscoveries = useCallback(async () => {
+      if (!documentId) {
+        return;
+      }
+
+      if (hasFetchedDiscoveryRef.current) {
+        return;
+      }
+
+      setDiscoveryState((prev) => ({
+        status: "loading",
+        data: prev.data,
+      }));
+
+      try {
+        const response = await fetch("/api/discovery", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            documentId,
+            documentTitle,
+            summary,
+            topics: (mainTopics || []).map((topic) => ({
+              topic: topic.topic,
+              description: topic.description,
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch discovery resources");
+        }
+
+        const payload = (await response.json()) as DiscoveryResponse;
+        setDiscoveryState({ status: "success", data: payload });
+        hasFetchedDiscoveryRef.current = true;
+      } catch (error) {
+        console.error("[discovery] fetch failed", error);
+        setDiscoveryState({ status: "error", data: null });
+      }
+    },
+    [documentId, documentTitle, mainTopics, summary]
+  );
+
+  useEffect(() => {
+    hasFetchedDiscoveryRef.current = false;
+    setDiscoveryState({ status: "idle", data: null });
+  }, [documentId]);
+
+  useEffect(() => {
+    fetchDiscoveries();
+  }, [fetchDiscoveries]);
+
   const handleAskAboutThis = (_text: string, context: SelectionContext) => {
     setChatContext(context);
     setShowContextualChat(true);
@@ -104,29 +155,13 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     chatId,
   });
 
-  const handleAction = (
-    type: PDFSuggestionAction["type"],
-    docId: string,
-    cId: string
-  ) => {
-    if (onAction) {
-      onAction(type, docId, cId);
-    } else {
-      // Use the PDF actions hook for default behavior
-      handlePDFAction(type, docId, cId);
-    }
-  };
-
-  const suggestionActions = createPDFSuggestionActions(
-    documentId,
-    chatId,
-    handleAction
-  );
-
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className={cn("flex flex-col gap-4 transition-all", className)}
+      className={cn(
+        "flex flex-col gap-4 transition-all lg:mr-16 lg:max-w-3xl xl:max-w-4xl",
+        className
+      )}
       initial={{ opacity: 0, y: 20 }}
       style={{
         fontSize: `${fontSize}px`,
@@ -178,12 +213,13 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         </div>
       )}
 
-      {/* Interactive suggestions */}
-      <div>
-        <h4 className="mb-3 font-medium text-muted-foreground text-sm">
-          What would you like to do?
-        </h4>
-        <PDFSuggestions actions={suggestionActions} />
+      {/* Inline discovery for small screens */}
+      <div className="lg:hidden">
+        <DiscoveryPanel
+          data={discoveryState.data}
+          isError={discoveryState.status === "error"}
+          isLoading={discoveryState.status === "loading"}
+        />
       </div>
 
       {/* Reading Controls Bar */}
@@ -209,6 +245,17 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
           />
         )}
       </NoteManager>
+
+      {/* Floating discovery panel for large screens */}
+      <div className="pointer-events-none fixed right-4 bottom-24 z-30 hidden lg:block">
+        <div className="pointer-events-auto w-80">
+          <DiscoveryPanel
+            data={discoveryState.data}
+            isError={discoveryState.status === "error"}
+            isLoading={discoveryState.status === "loading"}
+          />
+        </div>
+      </div>
 
       {/* Tips Collection Modal */}
       <TipsCollection
