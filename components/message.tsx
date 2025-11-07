@@ -111,6 +111,15 @@ const PurePreviewMessage = ({
           )}
 
           {message.parts?.map((part, index) => {
+            const rawType = (part as { type?: string }).type;
+            if (
+              rawType === "step-start" ||
+              rawType === "step-end" ||
+              rawType === "data-usage"
+            ) {
+              return null;
+            }
+
             const { type } = part;
             const key = `message-${message.id}-part-${index}`;
 

@@ -99,10 +99,17 @@ function PureMultimodalInput({
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
+  const hasExistingMessages = messages.length > 0;
 
   // Content type state management
   const [contentType, setContentType] = useState<ContentType>("pdf");
   const [showAutoDetected, setShowAutoDetected] = useState(false);
+  const [autoDetectedLabel, setAutoDetectedLabel] = useState<string | null>(
+    null
+  );
+  const autoDetectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   const adjustHeight = useCallback(() => {
     if (textareaRef.current) {
@@ -143,61 +150,93 @@ function PureMultimodalInput({
     setLocalStorageInput(input);
   }, [input, setLocalStorageInput]);
 
-  const handleInput = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = event.target.value;
-    setInput(value);
-
-    // Enhanced auto-detection logic
-    if (value.trim()) {
-      const trimmedValue = value.trim().toLowerCase();
-
-      // YouTube detection (more comprehensive)
-      if (
-        trimmedValue.includes("youtube.com") ||
-        trimmedValue.includes("youtu.be") ||
-        trimmedValue.includes("m.youtube.com") ||
-        trimmedValue.match(/youtube\.com\/watch\?v=/)
-      ) {
-        setContentType("youtube");
-        setShowAutoDetected(true);
-        setTimeout(() => setShowAutoDetected(false), 2000);
-      }
-      // Other video platforms
-      else if (
-        trimmedValue.includes("vimeo.com") ||
-        trimmedValue.includes("dailymotion.com") ||
-        trimmedValue.includes("twitch.tv")
-      ) {
-        setContentType("link"); // Treat as regular link for now
-        setShowAutoDetected(true);
-        setTimeout(() => setShowAutoDetected(false), 2000);
-      }
-      // Website/URL detection (more comprehensive)
-      else if (trimmedValue.match(/^https?:\/\/.+/)) {
-        setContentType("link");
-        setShowAutoDetected(true);
-        setTimeout(() => setShowAutoDetected(false), 2000);
-      }
-      // Text content detection (improved logic)
-      else if (
-        value.length > 50 &&
-        !trimmedValue.includes("http") &&
-        !trimmedValue.includes("www.") &&
-        trimmedValue.split(" ").length > 5
-      ) {
-        setContentType("text");
-        setShowAutoDetected(true);
-        setTimeout(() => setShowAutoDetected(false), 2000);
-      }
-      // Reset to PDF for short text or unclear content
-      else if (value.length < 20) {
-        setContentType("pdf");
-      }
-    } else {
-      // Reset to PDF when input is empty
-      setContentType("pdf");
+  const triggerAutoDetectFeedback = useCallback((label: string) => {
+    setAutoDetectedLabel(label);
+    setShowAutoDetected(true);
+    if (autoDetectTimeoutRef.current) {
+      clearTimeout(autoDetectTimeoutRef.current);
     }
-  };
+    autoDetectTimeoutRef.current = setTimeout(() => {
+      setShowAutoDetected(false);
+      setAutoDetectedLabel(null);
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (autoDetectTimeoutRef.current) {
+        clearTimeout(autoDetectTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleInput = useCallback(
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setInput(value);
+
+      // Enhanced auto-detection logic
+      if (value.trim()) {
+        const hasDocumentContext = Boolean(documentIds?.length);
+        const canAutoDetectTextNotebook =
+          messages.length === 0 && !hasDocumentContext;
+        const trimmedValue = value.trim().toLowerCase();
+        const wordCount = trimmedValue.split(/\s+/).filter(Boolean).length;
+        const newlineCount = (value.match(/\n/g) ?? []).length;
+        const looksLikeUrl =
+          trimmedValue.includes("http://") ||
+          trimmedValue.includes("https://") ||
+          trimmedValue.includes("www.");
+
+        // YouTube detection (more comprehensive)
+        if (
+          trimmedValue.includes("youtube.com") ||
+          trimmedValue.includes("youtu.be") ||
+          trimmedValue.includes("m.youtube.com") ||
+          trimmedValue.match(/youtube\.com\/watch\?v=/)
+        ) {
+          setContentType("youtube");
+          triggerAutoDetectFeedback("YouTube Video");
+        }
+        // Other video platforms
+        else if (
+          trimmedValue.includes("vimeo.com") ||
+          trimmedValue.includes("dailymotion.com") ||
+          trimmedValue.includes("twitch.tv")
+        ) {
+          setContentType("link"); // Treat as regular link for now
+          triggerAutoDetectFeedback("Website Link");
+        }
+        // Website/URL detection (more comprehensive)
+        else if (trimmedValue.match(/^https?:\/\/.+/)) {
+          setContentType("link");
+          triggerAutoDetectFeedback("Website Link");
+        }
+        // Text content detection (only when starting a new notebook)
+        else if (
+          canAutoDetectTextNotebook &&
+          !looksLikeUrl &&
+          (wordCount >= 3 || value.length >= 25 || newlineCount >= 1)
+        ) {
+          setContentType("text");
+          triggerAutoDetectFeedback("Plain Text");
+        } else if (value.length < 20 && canAutoDetectTextNotebook) {
+          setContentType("pdf");
+          setAutoDetectedLabel(null);
+          setShowAutoDetected(false);
+        } else if (!canAutoDetectTextNotebook) {
+          setAutoDetectedLabel(null);
+          setShowAutoDetected(false);
+        }
+      } else {
+        // Reset to PDF when input is empty
+        setContentType("pdf");
+        setAutoDetectedLabel(null);
+        setShowAutoDetected(false);
+      }
+    },
+    [documentIds, hasExistingMessages, setInput, triggerAutoDetectFeedback]
+  );
 
   const handleContentTypeSelect = (type: ContentType) => {
     setContentType(type);
@@ -241,6 +280,7 @@ function PureMultimodalInput({
     window.history.replaceState({}, "", "/");
 
     const trimmedInput = input.trim();
+    const hasDocumentContext = Boolean(documentIds?.length);
 
     if (!trimmedInput && attachments.length > 0) {
       try {
@@ -284,7 +324,7 @@ function PureMultimodalInput({
         }
 
         // Check if we're in an existing chat or starting fresh
-        const isNewChat = messages.length === 0;
+        const isNewChat = messages.length === 0 && !hasDocumentContext;
 
         if (isNewChat) {
           // For new chats: redirect to chat with document context
@@ -395,7 +435,7 @@ function PureMultimodalInput({
     }
 
     // Handle different content types (non-PDF) - Create notebooks like PDFs
-    if (contentType !== "pdf" && trimmedInput) {
+    if (contentType !== "pdf" && trimmedInput && !hasDocumentContext) {
       try {
         setIsProcessingAttachments(true);
 
@@ -479,9 +519,12 @@ function PureMultimodalInput({
     attachments,
     chatId,
     contentType,
+    documentIds,
     isProcessingAttachments,
     input,
+    messages,
     resetHeight,
+    router,
     sendMessage,
     setAttachments,
     setInput,
@@ -869,17 +912,10 @@ function PureMultimodalInput({
               fileInputRef={fileInputRef}
               onContentTypeSelect={handleContentTypeSelect}
             />
-            {showAutoDetected && (
+            {showAutoDetected && autoDetectedLabel && (
               <div className="flex items-center gap-1 rounded-md bg-green-50 px-2 py-1 text-green-700 text-xs">
                 <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                Auto-detected:{" "}
-                {contentType === "youtube"
-                  ? "YouTube Video"
-                  : contentType === "link"
-                    ? "Website Link"
-                    : contentType === "text"
-                      ? "Plain Text"
-                      : "PDF"}
+                Auto-detected: {autoDetectedLabel}
               </div>
             )}
             <AttachmentsButton

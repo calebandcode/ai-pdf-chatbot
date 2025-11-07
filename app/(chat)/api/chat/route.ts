@@ -87,6 +87,81 @@ export function getStreamContext() {
   return globalStreamContext;
 }
 
+const MAX_CONTEXT_SNIPPETS = 6;
+const MAX_CONTEXT_CHARS = 650;
+const FOLLOW_UP_HINTS: Array<{ regex: RegExp; hint: string }> = [
+  {
+    regex: /\bsummary|overview|main idea\b/i,
+    hint: "Would you like a section-by-section summary?",
+  },
+  {
+    regex: /\bpractice|quiz|questions?\b/i,
+    hint: "Want me to generate some practice questions on this topic?",
+  },
+  {
+    regex: /\bexplain|clarify|confus(ed|ing)\b/i,
+    hint: "Should we zoom in on that section for a deeper explanation?",
+  },
+  {
+    regex: /\bverbs?|grammar|conjugation\b/i,
+    hint: "Would reviewing the verb tables next be helpful?",
+  },
+];
+
+const dedupeRequestDocumentIds = (ids?: string[]): string[] => {
+  return Array.from(new Set((ids ?? []).filter((id): id is string => Boolean(id))));
+};
+
+type ContextSnippet = {
+  id: string;
+  page: number;
+  text: string;
+};
+
+const normalizeSnippetText = (value: string): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= MAX_CONTEXT_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, MAX_CONTEXT_CHARS)}...`;
+};
+
+const deriveFollowUpHint = (userMessage: string): string | null => {
+  for (const { regex, hint } of FOLLOW_UP_HINTS) {
+    if (regex.test(userMessage)) {
+      return hint;
+    }
+  }
+  return null;
+};
+
+const buildDocumentContextBlock = (
+  snippets: ContextSnippet[],
+  followUpHint: string | null
+) => {
+  if (!snippets.length) {
+    return "";
+  }
+  const header =
+    "You are assisting the user with their uploaded document. Use only the following excerpts as ground truth.";
+  const instructions = [
+    "Write a cohesive 2-3 sentence synthesis that references multiple excerpts.",
+    "Cite each factual claim inline using (Source X, Page Y).",
+    "If the answer is not present, say so and suggest where to look next in the document.",
+    `End with one conversational follow-up tailored to this question${
+      followUpHint ? ` (for example: "${followUpHint}")` : ""
+    }.`,
+  ].join(" ");
+
+  const body = snippets
+    .map(
+      (snippet) => `${snippet.id} (Page ${snippet.page}): ${snippet.text}`
+    )
+    .join("\n\n");
+
+  return `${header}\n\nExcerpts:\n${body}\n\nInstructions:\n${instructions}`;
+};
+
 export async function POST(request: Request) {
   let requestBody: PostRequestBody;
 
@@ -161,6 +236,7 @@ export async function POST(request: Request) {
     }
 
     const uiMessages = [...convertToUIMessages(messagesFromDb), message];
+    const normalizedDocumentIds = dedupeRequestDocumentIds(documentIds);
 
     const { longitude, latitude, city, country } = geolocation(request);
 
@@ -175,7 +251,7 @@ export async function POST(request: Request) {
     let hasDocumentContext = false;
     let documentContext = "";
 
-    if (documentIds && documentIds.length > 0) {
+    if (normalizedDocumentIds.length > 0) {
       try {
         // Retrieve relevant chunks based on the user's message
         const userMessageText = message.parts
@@ -185,28 +261,35 @@ export async function POST(request: Request) {
 
         const relevantChunks = await retrieveTopK({
           userId: session.user.id,
-          docIds: documentIds,
+          docIds: normalizedDocumentIds,
           query: userMessageText,
-          k: 10, // Get top 10 most relevant chunks
+          k: 12,
         });
 
         if (relevantChunks.length > 0) {
           hasDocumentContext = true;
-          const pageCount = Math.max(...relevantChunks.map((c) => c.page));
-
-          // Build context from relevant chunks
-          const contextText = relevantChunks
-            .map((chunk) => `Page ${chunk.page}: ${chunk.content}`)
-            .join("\n\n");
-
-          documentContext = `You have access to a document with ${pageCount} pages. Here are the most relevant sections for the user's question:\n\n${contextText}\n\nUse this as your primary source for all responses. Always cite page numbers when making claims.`;
+          const snippets = relevantChunks
+            .slice(0, MAX_CONTEXT_SNIPPETS)
+            .map((chunk, index) => ({
+              id: `Source ${index + 1}`,
+              page: chunk.page,
+              text: normalizeSnippetText(chunk.content),
+            }));
+          const followUpHint = deriveFollowUpHint(userMessageText);
+          documentContext = buildDocumentContextBlock(snippets, followUpHint);
         }
       } catch (error) {
         console.warn("Failed to load document context, using mock:", error);
         hasDocumentContext = true;
         documentContext =
-          "Document context: This is a PDF document that has been uploaded for learning. The AI tutor can help you understand the content, answer questions, and create quizzes based on the material.";
+          "Document context is temporarily unavailable. Let the user know you could not retrieve the relevant excerpts and offer to help once the document is processed.";
       }
+    }
+
+    if (!hasDocumentContext && normalizedDocumentIds.length > 0) {
+      hasDocumentContext = true;
+      documentContext =
+        "The user has uploaded document context for this conversation. Provide a 2-3 sentence synthesis grounded in that material, cite page numbers inline, and finish with one personalized follow-up question.";
     }
 
     try {
