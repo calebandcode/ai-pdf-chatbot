@@ -3,13 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useSearchParams } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
 import { ChatHeader } from "@/components/chat-header";
@@ -35,12 +29,12 @@ import { Artifact } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
+import { getChatHistoryPaginationKey } from "./sidebar-history";
 import {
+  type DocumentSourceMeta,
   SourcesCard,
   SourcesRail,
-  type DocumentSourceMeta,
 } from "./source-panel";
-import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -58,8 +52,7 @@ const extractDocIdsFromMessages = (messages: ChatMessage[]): string[] => {
         msg.parts
           ?.filter(
             (part) =>
-              (part as { type?: string }).type ===
-              ("data-pdfUpload" as const)
+              (part as { type?: string }).type === ("data-pdfUpload" as const)
           )
           .map(
             (part) =>
@@ -76,11 +69,11 @@ const toIsoString = (
   value?: string | number | Date | null
 ): string | undefined => {
   if (!value) {
-    return undefined;
+    return;
   }
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return undefined;
+    return;
   }
   return date.toISOString();
 };
@@ -110,18 +103,18 @@ const deriveSourcesFromMessages = (
 
   messages.forEach((message) => {
     message.parts
-      ?.filter(
-        (part) => (part as { type?: string }).type === "data-pdfUpload"
-      )
+      ?.filter((part) => (part as { type?: string }).type === "data-pdfUpload")
       .forEach((part) => {
-        const payload = (part as {
-          data?: {
-            documentId?: string;
-            documentTitle?: string;
-            summary?: string;
-            pageCount?: number;
-          };
-        }).data;
+        const payload = (
+          part as {
+            data?: {
+              documentId?: string;
+              documentTitle?: string;
+              summary?: string;
+              pageCount?: number;
+            };
+          }
+        ).data;
         if (!payload?.documentId) {
           return;
         }
@@ -434,16 +427,18 @@ export function Chat({
 
     const idsFromMessages = dedupeDocIds(
       messages
-        .flatMap((msg) =>
-          msg.parts
-            ?.filter(
-              (part) =>
-                (part as { type?: string }).type === ("data-pdfUpload" as const)
-            )
-            .map(
-              (part) =>
-                (part as { data?: { documentId?: string } }).data?.documentId
-            ) ?? []
+        .flatMap(
+          (msg) =>
+            msg.parts
+              ?.filter(
+                (part) =>
+                  (part as { type?: string }).type ===
+                  ("data-pdfUpload" as const)
+              )
+              .map(
+                (part) =>
+                  (part as { data?: { documentId?: string } }).data?.documentId
+              ) ?? []
         )
         .filter((docId): docId is string => Boolean(docId))
     );
@@ -707,7 +702,7 @@ export function Chat({
       </div>
 
       {shouldShowSources && (
-        <div className="pointer-events-none fixed right-4 bottom-28 z-40 hidden lg:block">
+        <div className="pointer-events-none fixed bottom-115 left-1 z-40 hidden lg:block">
           <div className="pointer-events-auto">
             <SourcesCard
               disabled={isReadonly}

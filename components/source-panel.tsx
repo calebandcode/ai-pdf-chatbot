@@ -22,9 +22,9 @@ type SourcesCardProps = {
   disabled?: boolean;
 };
 
-type SourceRailProps = SourcesCardProps;
+type SourcesRailProps = SourcesCardProps;
 
-const SOURCE_TYPE_COPY: Record<
+const SOURCE_TYPE_META: Record<
   SourceType,
   { label: string; icon: typeof FileText }
 > = {
@@ -37,7 +37,7 @@ const SOURCE_TYPE_COPY: Record<
 
 const formatMetaLine = (source: DocumentSourceMeta) => {
   const meta: string[] = [];
-  const typeCopy = SOURCE_TYPE_COPY[source.type];
+  const typeCopy = SOURCE_TYPE_META[source.type];
   if (typeCopy) {
     meta.push(typeCopy.label);
   }
@@ -68,33 +68,22 @@ const SourceListItem = ({
   source: DocumentSourceMeta;
   className?: string;
 }) => {
-  const Icon = SOURCE_TYPE_COPY[source.type]?.icon ?? FileText;
-  const metaLine = formatMetaLine(source);
+  const Icon = SOURCE_TYPE_META[source.type]?.icon ?? FileText;
+  // const metaLine = formatMetaLine(source);
   return (
     <div
-      className={cn(
-        "rounded-xl border border-border/60 bg-background/80 p-3 shadow-sm transition hover:border-primary/50 hover:shadow",
-        className
-      )}
+      className={cn("rounded-xl bg-background/85 p-2 transition", className)}
     >
       <div className="mb-2 flex items-center gap-2">
         <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
           <Icon className="size-4" />
         </div>
         <div className="min-w-0">
-          <p className="truncate font-medium text-sm text-foreground">
+          <p className="truncate font-medium text-foreground text-sm">
             {source.title || "Untitled"}
           </p>
-          {metaLine && (
-            <p className="truncate text-muted-foreground text-xs">{metaLine}</p>
-          )}
         </div>
       </div>
-      {source.summary && (
-        <p className="line-clamp-3 text-muted-foreground text-xs">
-          {source.summary}
-        </p>
-      )}
     </div>
   );
 };
@@ -120,7 +109,7 @@ const EmptyState = ({
   }
 
   return (
-    <div className="rounded-xl border border-dashed border-border/60 p-4 text-center text-muted-foreground text-xs">
+    <div className="rounded-xl border border-border/60 border-dashed p-4 text-center text-muted-foreground text-xs">
       {message}
     </div>
   );
@@ -133,10 +122,10 @@ export function SourcesCard({
   disabled = false,
 }: SourcesCardProps) {
   return (
-    <div className="w-80 rounded-2xl border border-border/70 bg-background/95 p-4 shadow-2xl backdrop-blur">
+    <div className="w-80 rounded-2xl p-5">
       <div className="mb-4 flex items-center justify-between gap-2">
         <div>
-          <p className="font-semibold text-sm text-foreground">Sources</p>
+          <p className="font-semibold text-foreground text-sm">Sources</p>
           <p className="text-muted-foreground text-xs">
             {sources.length
               ? `${sources.length} linked ${
@@ -146,7 +135,7 @@ export function SourcesCard({
           </p>
         </div>
         <button
-          className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-1 text-primary text-xs font-medium transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-1 font-medium text-primary text-xs transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled}
           onClick={onAddSource}
           type="button"
@@ -174,19 +163,19 @@ export function SourcesRail({
   isLoading,
   onAddSource,
   disabled = false,
-}: SourceRailProps) {
+}: SourcesRailProps) {
   if (!sources.length && !isLoading) {
     return null;
   }
 
   return (
-    <div className="border-b border-border/60 bg-muted/30 px-4 py-3 shadow-sm lg:hidden">
+    <div className="border-border/60 border-b bg-muted/30 px-4 py-3 shadow-sm lg:hidden">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
+        <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
           Sources
         </p>
         <button
-          className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-1 text-primary text-xs font-medium transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-1 font-medium text-primary text-xs transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={disabled}
           onClick={onAddSource}
           type="button"

@@ -649,6 +649,33 @@ export async function getDocumentRecordById({
   }
 }
 
+export async function getDocumentRecordsByIds({
+  ids,
+  userId,
+}: {
+  ids: string[];
+  userId: string;
+}): Promise<IngestedDocument[]> {
+  if (!ids.length) {
+    return [];
+  }
+
+  try {
+    const docs = await db
+      .select()
+      .from(documents)
+      .where(and(inArray(documents.id, ids), eq(documents.userId, userId)))
+      .orderBy(desc(documents.createdAt));
+
+    return docs;
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch document records"
+    );
+  }
+}
+
 export async function saveDocumentChunks({
   documentId,
   chunks,

@@ -32,6 +32,7 @@ import {
   createStreamId,
   deleteChatById,
   getChatById,
+  getDocumentById,
   getDocumentChunks,
   getMessageCountByUserId,
   getMessagesByChatId,
@@ -126,6 +127,32 @@ const normalizeSnippetText = (value: string): string => {
   return `${normalized.slice(0, MAX_CONTEXT_CHARS)}...`;
 };
 
+const formatMessageText = (message: ChatMessage): string => {
+  const text = message.parts
+    ?.filter((part) => (part as { type?: string }).type === "text")
+    .map((part) => (part as { text?: string }).text?.trim())
+    .filter(Boolean)
+    .join(" ");
+  return text || "";
+};
+
+const buildConversationHistory = (
+  messages: ChatMessage[],
+  limit = 5
+): string => {
+  if (!messages || messages.length === 0) {
+    return "";
+  }
+  const recent = messages.slice(-limit);
+  return recent
+    .map((msg) => {
+      const roleLabel = msg.role === "user" ? "User" : "Torah";
+      const text = formatMessageText(msg) || "[non-text message]";
+      return `- ${roleLabel}: ${text}`;
+    })
+    .join("\n");
+};
+
 const deriveFollowUpHint = (userMessage: string): string | null => {
   for (const { regex, hint } of FOLLOW_UP_HINTS) {
     if (regex.test(userMessage)) {
@@ -135,23 +162,33 @@ const deriveFollowUpHint = (userMessage: string): string | null => {
   return null;
 };
 
-const buildDocumentContextBlock = (
-  snippets: ContextSnippet[],
-  followUpHint: string | null
-) => {
+type ContextBlockOptions = {
+  snippets: ContextSnippet[];
+  followUpHint: string | null;
+  conversationHistory: string;
+  documentTitle?: string | null;
+  userQuestion: string;
+};
+
+const buildDocumentContextBlock = ({
+  snippets,
+  followUpHint,
+  conversationHistory,
+  documentTitle,
+  userQuestion,
+}: ContextBlockOptions) => {
   if (!snippets.length) {
     return "";
   }
-  const header =
-    "You are assisting the user with their uploaded document. Use only the following excerpts as ground truth.";
-  const instructions = [
-    "Write a cohesive 2-3 sentence synthesis that references multiple excerpts.",
-    "Cite each factual claim inline using (Source X, Page Y).",
-    "If the answer is not present, say so and suggest where to look next in the document.",
-    `End with one conversational follow-up tailored to this question${
-      followUpHint ? ` (for example: "${followUpHint}")` : ""
-    }.`,
-  ].join(" ");
+  const sections: string[] = [];
+
+  if (conversationHistory) {
+    sections.push(`Conversation so far:\n${conversationHistory}\n`);
+  }
+
+  if (documentTitle) {
+    sections.push(`Document: "${documentTitle.trim()}"\n`);
+  }
 
   const body = snippets
     .map(
@@ -159,7 +196,21 @@ const buildDocumentContextBlock = (
     )
     .join("\n\n");
 
-  return `${header}\n\nExcerpts:\n${body}\n\nInstructions:\n${instructions}`;
+  sections.push(`Relevant excerpts:\n${body}`);
+  sections.push(`User asked: "${userQuestion.trim()}"`);
+
+  const instructions = [
+    "Write a flowing, note-style explanation that analyses how and why these ideas connect. Use markdown headings, short paragraphs, and bold key terms where helpful.",
+    "Reference multiple excerpts and cite each factual claim inline as (Source X, Page Y).",
+    "If the information is missing, say so plainly and suggest where in the document the user should look next.",
+    `End with one conversational follow-up tailored to the user's request${
+      followUpHint ? ` (for example: "${followUpHint}")` : ""
+    }.`,
+  ].join(" ");
+
+  sections.push(`Instructions:\n${instructions}`);
+
+  return sections.join("\n\n");
 };
 
 export async function POST(request: Request) {
@@ -235,8 +286,22 @@ export async function POST(request: Request) {
       // Continue with empty messages for development
     }
 
-    const uiMessages = [...convertToUIMessages(messagesFromDb), message];
-    const normalizedDocumentIds = dedupeRequestDocumentIds(documentIds);
+    const previousMessages = convertToUIMessages(messagesFromDb);
+    const uiMessages = [...previousMessages, message];
+    const conversationHistory = buildConversationHistory(previousMessages);
+
+    const derivedDocumentIds = dedupeRequestDocumentIds([
+      ...(documentIds || []),
+      ...messagesFromDb
+        .flatMap((msg) => {
+          const parts = (msg as { parts?: any[] }).parts ?? [];
+          return parts
+            .filter((part) => part?.type === "data-pdfUpload")
+            .map((part) => part?.data?.documentId)
+            .filter(Boolean);
+        })
+        .filter((id): id is string => Boolean(id)),
+    ]);
 
     const { longitude, latitude, city, country } = geolocation(request);
 
@@ -250,18 +315,27 @@ export async function POST(request: Request) {
     // Check if we have document context for PDF tutoring
     let hasDocumentContext = false;
     let documentContext = "";
+    const userMessageText = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join(" ");
+    const followUpHint = deriveFollowUpHint(userMessageText);
+    let primaryDocumentTitle: string | undefined;
 
-    if (normalizedDocumentIds.length > 0) {
+    if (derivedDocumentIds.length > 0) {
       try {
-        // Retrieve relevant chunks based on the user's message
-        const userMessageText = message.parts
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join(" ");
+        const docMeta = await getDocumentById({
+          id: derivedDocumentIds[0],
+        });
+        primaryDocumentTitle = docMeta?.title || undefined;
+      } catch (docError) {
+        console.warn("Unable to load document metadata:", docError);
+      }
 
+      try {
         const relevantChunks = await retrieveTopK({
           userId: session.user.id,
-          docIds: normalizedDocumentIds,
+          docIds: derivedDocumentIds,
           query: userMessageText,
           k: 12,
         });
@@ -275,21 +349,31 @@ export async function POST(request: Request) {
               page: chunk.page,
               text: normalizeSnippetText(chunk.content),
             }));
-          const followUpHint = deriveFollowUpHint(userMessageText);
-          documentContext = buildDocumentContextBlock(snippets, followUpHint);
+
+          documentContext = buildDocumentContextBlock({
+            snippets,
+            followUpHint,
+            conversationHistory,
+            documentTitle: primaryDocumentTitle,
+            userQuestion: userMessageText,
+          });
         }
       } catch (error) {
         console.warn("Failed to load document context, using mock:", error);
         hasDocumentContext = true;
-        documentContext =
-          "Document context is temporarily unavailable. Let the user know you could not retrieve the relevant excerpts and offer to help once the document is processed.";
+        documentContext = `${
+          conversationHistory
+            ? `Conversation so far:\n${conversationHistory}\n\n`
+            : ""
+        }User asked: "${userMessageText.trim()}". Document excerpts were unavailable; let the user know you couldn't retrieve them yet and invite them to point to a specific section.`;
       }
     }
 
-    if (!hasDocumentContext && normalizedDocumentIds.length > 0) {
+    if (!hasDocumentContext && derivedDocumentIds.length > 0) {
       hasDocumentContext = true;
-      documentContext =
-        "The user has uploaded document context for this conversation. Provide a 2-3 sentence synthesis grounded in that material, cite page numbers inline, and finish with one personalized follow-up question.";
+      documentContext = `${
+        conversationHistory ? `Conversation so far:\n${conversationHistory}\n\n` : ""
+      }User asked: "${userMessageText.trim()}". The user has uploaded document context, so answer once excerpts are ready and ask which section to dive into next.`;
     }
 
     try {

@@ -62,6 +62,24 @@ export function ContentTypeMenu({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleExternalOpen = () => {
+      if (disabled) {
+        return;
+      }
+      setIsOpen(true);
+    };
+
+    window.addEventListener("open-content-type-menu", handleExternalOpen);
+    return () => {
+      window.removeEventListener("open-content-type-menu", handleExternalOpen);
+    };
+  }, [disabled]);
+
   const handleSelect = (type: ContentType) => {
     if (type === "pdf") {
       // Trigger file input for PDF

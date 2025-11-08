@@ -57,7 +57,7 @@ export function DiscoveryPanel({
   }
 
   return (
-    <div className="rounded-xl bg-white/70 p-4">
+    <div className="rounded-xl bg-white/70 p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="rounded-full bg-primary/10 p-1.5 text-primary">
