@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { chat, message, user, messageV2, quizzes, questions, stream, attempts, answers, documents, docChunks, suggestion, document, chatQuizzes, lessons, flashcards, documentSummaries, tutorSessions, vote, voteV2 } from "./schema";
+import { chat, message, user, messageV2, quizzes, questions, stream, attempts, answers, documents, docChunks, suggestion, document, chatQuizzes, lessons, flashcards, documentSummaries, tutorSessions, vote, voteV2, chatContexts } from "./schema";
 
 export const messageRelations = relations(message, ({one, many}) => ({
 	chat: one(chat, {
@@ -14,6 +14,10 @@ export const chatRelations = relations(chat, ({one, many}) => ({
 	user: one(user, {
 		fields: [chat.userId],
 		references: [user.id]
+	}),
+	context: one(chatContexts, {
+		fields: [chat.id],
+		references: [chatContexts.chatId]
 	}),
 	messageV2s: many(messageV2),
 	streams: many(stream),
@@ -135,6 +139,13 @@ export const documentSummariesRelations = relations(documentSummaries, ({one}) =
 	document: one(documents, {
 		fields: [documentSummaries.documentId],
 		references: [documents.id]
+	}),
+}));
+
+export const chatContextsRelations = relations(chatContexts, ({one}) => ({
+	chat: one(chat, {
+		fields: [chatContexts.chatId],
+		references: [chat.id]
 	}),
 }));
 

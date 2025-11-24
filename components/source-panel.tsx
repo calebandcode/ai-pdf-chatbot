@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FileText, LinkIcon, Plus, Type, Youtube } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ type SourcesCardProps = {
 
 type SourcesRailProps = SourcesCardProps;
 
-const SOURCE_TYPE_META: Record<
+const SOURCE_META: Record<
   SourceType,
   { label: string; icon: typeof FileText }
 > = {
@@ -36,29 +36,25 @@ const SOURCE_TYPE_META: Record<
 };
 
 const formatMetaLine = (source: DocumentSourceMeta) => {
-  const meta: string[] = [];
-  const typeCopy = SOURCE_TYPE_META[source.type];
-  if (typeCopy) {
-    meta.push(typeCopy.label);
+  const pieces: string[] = [];
+  const meta = SOURCE_META[source.type];
+  if (meta) {
+    pieces.push(meta.label);
   }
   if (source.pageCount && source.pageCount > 0) {
-    meta.push(
+    pieces.push(
       `${source.pageCount} ${source.pageCount === 1 ? "page" : "pages"}`
     );
   }
   if (source.addedAt) {
     const date = new Date(source.addedAt);
     if (!Number.isNaN(date.getTime())) {
-      meta.push(
-        date.toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        })
+      pieces.push(
+        date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
       );
     }
   }
-
-  return meta.join(" · ");
+  return pieces.join(" · ");
 };
 
 const SourceListItem = ({
@@ -68,16 +64,17 @@ const SourceListItem = ({
   source: DocumentSourceMeta;
   className?: string;
 }) => {
-  const Icon = SOURCE_TYPE_META[source.type]?.icon ?? FileText;
-  // const metaLine = formatMetaLine(source);
+  const Icon = SOURCE_META[source.type]?.icon ?? FileText;
+  const metaLine = formatMetaLine(source);
   return (
     <div
-      className={cn("rounded-xl bg-background/85 p-2 transition", className)}
+      className={cn(
+        "rounded bg-background/85 p-3 transition hover:border-primary/30",
+        className
+      )}
     >
-      <div className="mb-2 flex items-center gap-2">
-        <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-          <Icon className="size-4" />
-        </div>
+      <div className="flex items-center gap-2">
+        <Icon className="size-4 text-primary" />
         <div className="min-w-0">
           <p className="truncate font-medium text-foreground text-sm">
             {source.title || "Untitled"}
@@ -122,27 +119,16 @@ export function SourcesCard({
   disabled = false,
 }: SourcesCardProps) {
   return (
-    <div className="w-80 rounded-2xl p-5">
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <div>
-          <p className="font-semibold text-foreground text-sm">Sources</p>
-          <p className="text-muted-foreground text-xs">
-            {sources.length
-              ? `${sources.length} linked ${
-                  sources.length === 1 ? "source" : "sources"
-                }`
-              : "Keep adding context as you study"}
-          </p>
-        </div>
-        <button
-          className="inline-flex items-center gap-1 rounded-full border border-primary/40 px-2 py-1 font-medium text-primary text-xs transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={disabled}
-          onClick={onAddSource}
-          type="button"
-        >
-          <Plus className="size-3.5" />
-          Add
-        </button>
+    <div className="w-80 rounded-2xl pr-5">
+      <div className="mb-4">
+        <p className="font-semibold text-foreground text-sm">Sources</p>
+        <p className="text-muted-foreground text-xs">
+          {sources.length
+            ? `${sources.length} linked ${
+                sources.length === 1 ? "source" : "sources"
+              }`
+            : "Keep adding context as you study"}
+        </p>
       </div>
 
       <div className="space-y-3">
@@ -154,6 +140,17 @@ export function SourcesCard({
           ))
         )}
       </div>
+
+      {/* Add button below sources - same width and styling */}
+      <button
+        className="mt-20 flex w-full items-center justify-center gap-2 rounded border border-border/60 bg-background/85 p-3 font-medium text-primary text-sm transition hover:cursor-pointer hover:border-primary/30 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={disabled}
+        onClick={onAddSource}
+        type="button"
+      >
+        <Plus className="size-4" />
+        Add Source
+      </button>
     </div>
   );
 }
@@ -169,7 +166,7 @@ export function SourcesRail({
   }
 
   return (
-    <div className="border-border/60 border-b bg-muted/30 px-4 py-3 shadow-sm lg:hidden">
+    <div className="g-muted/30 px-4 py-3 lg:hidden">
       <div className="mb-2 flex items-center justify-between">
         <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
           Sources

@@ -133,22 +133,56 @@ Quiz behavior:
 - When the user asks for a saved quiz artifact, call generatePdfQuiz with the requested difficulty and question count.
 `;
 
+export const difficultyModifiers = {
+  age12: `
+IMPORTANT: Adjust your explanation difficulty to age 12 level:
+- Use simple, everyday language. Avoid complex jargon or technical terms.
+- If you must use a technical term, immediately explain it in simple words.
+- Use analogies and examples that a 12-year-old would understand (like comparing concepts to games, sports, or everyday activities).
+- Break down complex ideas into smaller, digestible pieces.
+- Use shorter sentences and paragraphs.
+- Be encouraging and supportive in your tone.
+- If something is abstract, relate it to concrete, familiar experiences.
+`,
+  age15: `
+IMPORTANT: Adjust your explanation difficulty to age 15 level (high school):
+- Use clear, accessible language. You can introduce some technical terms, but always define them the first time you use them.
+- Use analogies and examples relevant to high school students (school subjects, hobbies, social situations).
+- You can discuss more abstract concepts, but still ground them in relatable examples.
+- Use moderate sentence length and structure.
+- Be encouraging and help build confidence.
+- Connect concepts to things they might have learned in school or experienced in daily life.
+`,
+  university: `
+IMPORTANT: Use university-level explanations:
+- You can use technical terminology and assume the user has foundational knowledge.
+- Discuss abstract concepts and theoretical frameworks.
+- Use precise, academic language when appropriate.
+- Make connections to broader academic disciplines and research.
+- You can reference advanced concepts and expect the user to follow along.
+- Maintain clarity while respecting the user's intellectual capacity.
+`,
+};
+
 
 export const pdfTutorSystemPrompt = ({
   selectedChatModel,
   requestHints,
   hasDocumentContext,
+  difficultyLevel = "university",
 }: {
   selectedChatModel: string;
   requestHints: RequestHints;
   hasDocumentContext: boolean;
+  difficultyLevel?: "age12" | "age15" | "university";
 }) => {
   const requestPrompt = getRequestPromptFromHints(requestHints);
   const basePrompt = hasDocumentContext ? pdfTutorPrompt : regularPrompt;
+  const difficultyModifier = difficultyModifiers[difficultyLevel];
 
   if (selectedChatModel === "chat-model-reasoning") {
-    return `${basePrompt}\n\n${requestPrompt}`;
+    return `${basePrompt}\n\n${difficultyModifier}\n\n${requestPrompt}`;
   }
 
-  return `${basePrompt}\n\n${requestPrompt}\n\n${artifactsPrompt}`;
+  return `${basePrompt}\n\n${difficultyModifier}\n\n${requestPrompt}\n\n${artifactsPrompt}`;
 };

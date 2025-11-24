@@ -42,6 +42,9 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
   const cookieStore = await cookies();
   const chatModelFromCookie = cookieStore.get("chat-model");
 
+  const difficultyLevel =
+    (chat.difficultyLevel as "age12" | "age15" | "university") ?? "university";
+
   if (!chatModelFromCookie) {
     return (
       <>
@@ -49,6 +52,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
           autoResume={true}
           id={chat.id}
           initialChatModel={DEFAULT_CHAT_MODEL}
+          initialDifficultyLevel={difficultyLevel}
           initialLastContext={chat.lastContext ?? undefined}
           initialMessages={uiMessages}
           initialVisibilityType={chat.visibility}
@@ -65,6 +69,7 @@ export default async function Page(props: { params: Promise<{ id: string }> }) {
         autoResume={true}
         id={chat.id}
         initialChatModel={chatModelFromCookie.value}
+        initialDifficultyLevel={difficultyLevel}
         initialLastContext={chat.lastContext ?? undefined}
         initialMessages={uiMessages}
         initialVisibilityType={chat.visibility}

@@ -70,11 +70,7 @@ const PurePreviewMessage = ({
           "justify-start": message.role === "assistant",
         })}
       >
-        {message.role === "assistant" && (
-          <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-            <SparklesIcon size={14} />
-          </div>
-        )}
+        {/* Sparkle icon removed per user request */}
 
         <div
           className={cn("flex flex-col", {
@@ -115,7 +111,8 @@ const PurePreviewMessage = ({
             if (
               rawType === "step-start" ||
               rawType === "step-end" ||
-              rawType === "data-usage"
+              rawType === "data-usage" ||
+              rawType === "data-topicExplanation" // Hide topic explanation metadata from chat view
             ) {
               return null;
             }
@@ -150,6 +147,33 @@ const PurePreviewMessage = ({
             }
 
             if (type === "text") {
+              // Skip text parts that are topic explanations (they appear in topic expansions, not chat)
+              const hasTopicExplanation = message.parts?.some(
+                (p) => (p as { type?: string }).type === "data-topicExplanation"
+              );
+              if (hasTopicExplanation) {
+                // Hide text when it's a topic explanation (should only appear in topic expansion)
+                return null;
+              }
+              
+              // Skip text parts that are status messages when there's a PDFUploadMessage
+              // Delta messages are now shown as toast notifications, not in chat messages
+              const hasPdfUpload = message.parts?.some(
+                (p) => p.type === "data-pdfUpload"
+              );
+              if (hasPdfUpload) {
+                // Hide status messages when PDFUploadMessage is present
+                // These are now handled as toast notifications
+                const isStatusMessage = 
+                  part.text?.includes("Done • analyzed") ||
+                  part.text?.includes("notebook") ||
+                  part.text?.includes("Added") ||
+                  part.text?.includes("Introduces") ||
+                  part.text?.includes("Complements");
+                if (isStatusMessage) {
+                  return null;
+                }
+              }
               if (mode === "view") {
                 return (
                   <div key={key}>
@@ -527,9 +551,7 @@ export const ThinkingMessage = () => {
       initial={{ opacity: 0 }}
     >
       <div className="flex items-start justify-start gap-3">
-        <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-          <SparklesIcon size={14} />
-        </div>
+        {/* Sparkle icon removed per user request */}
 
         <div className="flex w-full flex-col gap-2 md:gap-4">
           <div className="p-0 text-muted-foreground text-sm">

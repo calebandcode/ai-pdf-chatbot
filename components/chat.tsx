@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
+import { addSourceToChat } from "@/app/actions/add-source-to-chat";
+import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
 import { ChatHeader } from "@/components/chat-header";
 import {
   AlertDialog,
@@ -20,21 +22,19 @@ import {
 import { useArtifactSelector } from "@/hooks/use-artifact";
 import { useAutoResume } from "@/hooks/use-auto-resume";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
-import type { Vote } from "@/lib/db/schema";
+import type { ChatContext, Vote } from "@/lib/db/schema";
 import { ChatSDKError } from "@/lib/errors";
 import type { Attachment, ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { fetcher, fetchWithErrorHandlers, generateUUID } from "@/lib/utils";
+import { AddSourceModal, type AddSourcePayload } from "./add-source-modal";
 import { Artifact } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { Messages } from "./messages";
+import { HybridNotebookView } from "./hybrid-notebook-view";
 import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
-import {
-  type DocumentSourceMeta,
-  SourcesCard,
-  SourcesRail,
-} from "./source-panel";
+import type { DocumentSourceMeta } from "./source-panel";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
 
@@ -124,7 +124,9 @@ const deriveSourcesFromMessages = (
           title: payload.documentTitle || "Untitled",
           summary: payload.summary,
           pageCount: payload.pageCount,
-          addedAt: toIsoString(message.createdAt),
+          addedAt: message.metadata?.createdAt 
+            ? toIsoString(new Date(message.metadata.createdAt))
+            : toIsoString(new Date()),
           type: "pdf",
           origin: "message",
         };
@@ -143,6 +145,8 @@ export function Chat({
   autoResume,
   initialLastContext,
   documentIds,
+  initialContext,
+  initialDifficultyLevel = "university",
 }: {
   id: string;
   initialMessages: ChatMessage[];
@@ -152,6 +156,8 @@ export function Chat({
   autoResume: boolean;
   initialLastContext?: AppUsage;
   documentIds?: string[];
+  initialContext?: ChatContext | null;
+  initialDifficultyLevel?: "age12" | "age15" | "university";
 }) {
   const { visibilityType } = useChatVisibility({
     chatId: id,
@@ -166,6 +172,35 @@ export function Chat({
   const [showCreditCardAlert, setShowCreditCardAlert] = useState(false);
   const [currentModelId, setCurrentModelId] = useState(initialChatModel);
   const currentModelIdRef = useRef(currentModelId);
+  const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false);
+  const [isSubmittingSource, setIsSubmittingSource] = useState(false);
+  const [addSourceError, setAddSourceError] = useState<string | null>(null);
+  const [context, setContext] = useState<ChatContext | null>(
+    initialContext ?? null
+  );
+  const [currentMode, setCurrentMode] = useState<"agent" | "edit">("agent");
+  const [difficultyLevel, setDifficultyLevel] = useState<
+    "age12" | "age15" | "university"
+  >(initialDifficultyLevel);
+
+  useEffect(() => {
+    setContext(initialContext ?? null);
+  }, [initialContext]);
+
+  const refreshContext = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/chat/${id}/context`);
+      if (!response.ok) {
+        return null;
+      }
+      const payload = await response.json();
+      setContext(payload.context ?? null);
+      return payload.context ?? null;
+    } catch (err) {
+      console.warn("Failed to refresh chat context", err);
+      return null;
+    }
+  }, [id]);
 
   const [sourceMeta, setSourceMeta] = useState<
     Record<string, DocumentSourceMeta>
@@ -243,6 +278,14 @@ export function Chat({
   }, [documentIdsKey, id]);
 
   const allDocumentIds = persistedDocIds;
+  const contextDocumentIds = useMemo(
+    () => (context?.sources ?? []).map((source) => source.documentId),
+    [context]
+  );
+  const contextDocumentIdsKey = useMemo(
+    () => contextDocumentIds.join("|"),
+    [contextDocumentIds]
+  );
   const allDocumentIdsKey = useMemo(
     () => allDocumentIds.join("|"),
     [allDocumentIds]
@@ -262,6 +305,19 @@ export function Chat({
       .map((docId) => sourceMeta[docId])
       .filter((meta): meta is DocumentSourceMeta => Boolean(meta));
   }, [allDocumentIdsKey, sourceMeta]);
+  const panelSources = useMemo<DocumentSourceMeta[]>(() => {
+    if (context?.sources?.length) {
+      return context.sources.map((source) => ({
+        id: source.documentId,
+        title: source.title,
+        summary: source.summary,
+        type: "pdf" as const,
+        pageCount: source.mainTopics?.[0]?.pages?.length ?? undefined,
+        origin: "record",
+      }));
+    }
+    return sources;
+  }, [context, sources]);
 
   useEffect(() => {
     currentModelIdRef.current = currentModelId;
@@ -392,6 +448,7 @@ export function Chat({
           if (response.ok) {
             const latestMessages = await response.json();
             setMessages(latestMessages);
+            await refreshContext();
           }
         } catch (error) {
           console.warn("Failed to refresh messages:", error);
@@ -403,7 +460,7 @@ export function Chat({
     return () => {
       window.removeEventListener("refresh-messages", handleRefreshMessages);
     };
-  }, [id, setMessages]);
+  }, [id, refreshContext, setMessages]);
 
   const { data: votes } = useSWR<Vote[]>(
     messages.length >= 2 ? `/api/vote?chatId=${id}` : null,
@@ -458,6 +515,48 @@ export function Chat({
       return merged;
     });
   }, [id, messages]);
+
+  useEffect(() => {
+    if (!context?.sources?.length) {
+      return;
+    }
+    setSourceMeta((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      context.sources.forEach((source) => {
+        const { documentId } = source;
+        if (!documentId || next[documentId]?.origin === "record") {
+          return;
+        }
+        next[documentId] = {
+          id: documentId,
+          title: source.title,
+          summary: source.summary,
+          pageCount: source.mainTopics?.[0]?.pages?.length ?? undefined,
+          type: "pdf",
+          origin: "record",
+        };
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [context]);
+
+  useEffect(() => {
+    if (!contextDocumentIds.length) {
+      return;
+    }
+    setPersistedDocIds((prev) => {
+      const merged = dedupeDocIds([...prev, ...contextDocumentIds]);
+      if (merged.length !== prev.length && typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          `chat-${id}-docIds`,
+          JSON.stringify(merged)
+        );
+      }
+      return merged;
+    });
+  }, [contextDocumentIdsKey, contextDocumentIds, id]);
 
   useEffect(() => {
     if (!messages?.length) {
@@ -629,90 +728,132 @@ export function Chat({
   }, [missingDocumentIdsKey]);
 
   const handleAddSource = useCallback(() => {
-    if (isReadonly || typeof window === "undefined") {
+    if (isReadonly) {
       return;
     }
-
-    window.dispatchEvent(new CustomEvent("open-content-type-menu"));
-    requestAnimationFrame(() => {
-      const textarea = document.querySelector<HTMLTextAreaElement>(
-        'textarea[data-testid="multimodal-input"]'
-      );
-      if (textarea) {
-        textarea.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        textarea.focus();
-      }
-    });
+    setAddSourceError(null);
+    setIsAddSourceModalOpen(true);
   }, [isReadonly]);
 
-  const shouldShowSources =
-    allDocumentIds.length > 0 && (sources.length > 0 || isSourcesLoading);
+  const handleAddSourceSubmit = useCallback(
+    async (payload: AddSourcePayload) => {
+      if (!id) {
+        return;
+      }
+      setIsSubmittingSource(true);
+      setAddSourceError(null);
+      try {
+        let deltaMessage: string | undefined;
+        if (payload.kind === "pdf") {
+          const formData = new FormData();
+          formData.append("files", payload.file);
+          const result = await uploadAndIngest(formData, { chatId: id });
+          // Get delta message from first document result (when adding to existing chat)
+          deltaMessage = result.documents?.[0]?.deltaMessage;
+        } else {
+          const contentType = payload.kind;
+          const result = await addSourceToChat({
+            chatId: id,
+            contentType,
+            content: contentType === "link" ? payload.url : payload.content,
+            title:
+              contentType === "link"
+                ? payload.title
+                : (payload.title ?? undefined),
+          });
+          deltaMessage = result.deltaMessage;
+        }
+
+        window.dispatchEvent(
+          new CustomEvent("refresh-messages", { detail: { chatId: id } })
+        );
+
+        // Show delta message as toast if available, otherwise show generic message
+        if (deltaMessage) {
+          toast.success(deltaMessage);
+        } else {
+          toast.success("Source added to this chat");
+        }
+
+        setIsAddSourceModalOpen(false);
+        await refreshContext();
+      } catch (err) {
+        console.error("Failed to add source", err);
+        setAddSourceError(
+          err instanceof Error ? err.message : "Failed to add source"
+        );
+      } finally {
+        setIsSubmittingSource(false);
+      }
+    },
+    [id, refreshContext]
+  );
 
   return (
     <>
       <div className="overscroll-behavior-contain flex h-dvh min-w-0 touch-pan-y flex-col bg-background">
+        <div className="h-12 shrink-0" />
         <ChatHeader
           chatId={id}
+          difficultyLevel={difficultyLevel}
           isReadonly={isReadonly}
+          onDifficultyChange={setDifficultyLevel}
           selectedVisibilityType={initialVisibilityType}
         />
 
-        {shouldShowSources && (
-          <SourcesRail
-            disabled={isReadonly}
-            isLoading={isSourcesLoading}
-            onAddSource={handleAddSource}
-            sources={sources}
+        {/* Hybrid Notebook View - main content */}
+        <div className="relative min-h-0 flex-1 pb-32">
+          <HybridNotebookView
+            chatId={id}
+            isArtifactVisible={isArtifactVisible}
+            isReadonly={isReadonly}
+            messages={messages}
+            onModeChange={setCurrentMode}
+            regenerate={regenerate}
+            selectedModelId={initialChatModel}
+            setMessages={setMessages}
+            status={status}
+            votes={votes}
           />
-        )}
-
-        <Messages
-          chatId={id}
-          isArtifactVisible={isArtifactVisible}
-          isReadonly={isReadonly}
-          messages={messages}
-          regenerate={regenerate}
-          selectedModelId={initialChatModel}
-          setMessages={setMessages}
-          status={status}
-          votes={votes}
-        />
-
-        <div className="sticky bottom-0 z-30 mx-auto flex w-full max-w-4xl gap-2 border-t-0 bg-background px-2 pb-3 md:px-4 md:pb-4">
-          {!isReadonly && (
-            <MultimodalInput
-              attachments={attachments}
-              chatId={id}
-              documentIds={allDocumentIds}
-              input={input}
-              messages={messages}
-              onModelChange={setCurrentModelId}
-              selectedModelId={currentModelId}
-              selectedVisibilityType={visibilityType}
-              sendMessage={sendMessage}
-              setAttachments={setAttachments}
-              setInput={setInput}
-              setMessages={setMessages}
-              status={status}
-              stop={stop}
-              usage={usage}
-            />
-          )}
         </div>
+
+        {/* Only show input in Agent Mode, not Edit Mode */}
+        {currentMode === "agent" && (
+          <div className="fixed bottom-0 left-0 right-0 z-30 bg-background">
+            <div className="mx-auto flex w-full max-w-4xl gap-2 px-2 pb-3 md:px-4 md:pb-4">
+              {!isReadonly && (
+                <MultimodalInput
+                  attachments={attachments}
+                  chatId={id}
+                  documentIds={allDocumentIds}
+                  input={input}
+                  messages={messages}
+                  onModelChange={setCurrentModelId}
+                  selectedModelId={currentModelId}
+                  selectedVisibilityType={visibilityType}
+                  sendMessage={sendMessage}
+                  setAttachments={setAttachments}
+                  setInput={setInput}
+                  setMessages={setMessages}
+                  status={status}
+                  stop={stop}
+                  usage={usage}
+                />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {shouldShowSources && (
-        <div className="pointer-events-none fixed bottom-115 left-1 z-40 hidden lg:block">
-          <div className="pointer-events-auto">
-            <SourcesCard
-              disabled={isReadonly}
-              isLoading={isSourcesLoading}
-              onAddSource={handleAddSource}
-              sources={sources}
-            />
-          </div>
-        </div>
-      )}
+      {/* Sources panel hidden in game-focused pivot */}
+
+      <AddSourceModal
+        error={addSourceError}
+        isSubmitting={isSubmittingSource}
+        onOpenChange={setIsAddSourceModalOpen}
+        onSubmit={handleAddSourceSubmit}
+        open={isAddSourceModalOpen}
+      />
 
       <Artifact
         attachments={attachments}

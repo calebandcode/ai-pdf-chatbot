@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { memo } from "react";
+import type { DifficultyLevel } from "./difficulty-selector";
 import { HeaderUserNav } from "./header-user-nav";
 import { PlusIcon } from "./icons";
 import { Button } from "./ui/button";
@@ -17,15 +18,19 @@ function PureChatHeader({
   chatId,
   selectedVisibilityType,
   isReadonly,
+  difficultyLevel,
+  onDifficultyChange,
 }: {
   chatId: string;
   selectedVisibilityType: VisibilityType;
   isReadonly: boolean;
+  difficultyLevel?: DifficultyLevel;
+  onDifficultyChange?: (difficulty: DifficultyLevel) => void;
 }) {
   const router = useRouter();
 
   return (
-    <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
+    <header className="fixed top-0 left-0 right-0 z-40 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
       <div className="flex items-center gap-2">
         {!isReadonly && (
           <>
@@ -58,7 +63,7 @@ function PureChatHeader({
         )}
       </div>
 
-      <div className="hidden md:ml-auto md:flex">
+      <div className="hidden md:ml-auto md:flex md:items-center md:gap-2">
         <HeaderUserNav />
       </div>
     </header>
@@ -69,6 +74,7 @@ export const ChatHeader = memo(PureChatHeader, (prevProps, nextProps) => {
   return (
     prevProps.chatId === nextProps.chatId &&
     prevProps.selectedVisibilityType === nextProps.selectedVisibilityType &&
-    prevProps.isReadonly === nextProps.isReadonly
+    prevProps.isReadonly === nextProps.isReadonly &&
+    prevProps.difficultyLevel === nextProps.difficultyLevel
   );
 });

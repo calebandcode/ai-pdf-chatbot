@@ -20,6 +20,7 @@ import {
 import { toast } from "sonner";
 import { useLocalStorage, useWindowSize } from "usehooks-ts";
 import { saveChatModelAsCookie } from "@/app/(chat)/actions";
+import { createCourseFromUpload } from "@/app/actions/create-course-from-upload";
 import { generateQuiz } from "@/app/actions/generate-quiz";
 import { processAndCreateNotebook } from "@/app/actions/process-and-create-notebook";
 import { uploadAndIngest } from "@/app/actions/upload-and-ingest";
@@ -49,7 +50,6 @@ import {
   StopIcon,
 } from "./icons";
 import { PreviewAttachment } from "./preview-attachment";
-import { SuggestedActions } from "./suggested-actions";
 import { Button } from "./ui/button";
 import {
   Tooltip,
@@ -313,37 +313,23 @@ function PureMultimodalInput({
             formData.append("files", ingestedFile, ingestedFile.name);
           })
         );
-
-        console.time("uploadAndIngest(submitForm)");
-        const { documents } = await uploadAndIngest(formData);
-        console.timeEnd("uploadAndIngest(submitForm)");
-        console.log("submitForm: uploadAndIngest returned", documents);
-
-        if (!documents || documents.length === 0) {
-          throw new Error("No documents returned from ingestion");
-        }
-
         // Check if we're in an existing chat or starting fresh
         const isNewChat = messages.length === 0 && !hasDocumentContext;
 
         if (isNewChat) {
-          // For new chats: redirect to chat with document context
-          const firstDoc = documents[0];
-          if (firstDoc?.documentId && firstDoc?.summary) {
-            // Store PDF upload intent for next page
-            sessionStorage.setItem(
-              "pendingPdfMessage",
-              JSON.stringify({
-                docId: firstDoc.documentId,
-                title: firstDoc.title || undefined,
-              })
-            );
-            const chatUrl = `/?doc=${firstDoc.documentId}&summary=${encodeURIComponent(firstDoc.summary)}`;
-            console.log("submitForm: redirecting to", chatUrl);
-            window.location.href = chatUrl;
-            return;
-          }
+          // For new chats: create a LingoPlay course and redirect to the course map
+          await createCourseFromUpload(formData);
+          return;
         } else {
+          console.time("uploadAndIngest(submitForm)");
+          const { documents } = await uploadAndIngest(formData);
+          console.timeEnd("uploadAndIngest(submitForm)");
+          console.log("submitForm: uploadAndIngest returned", documents);
+
+          if (!documents || documents.length === 0) {
+            throw new Error("No documents returned from ingestion");
+          }
+
           // For existing chats: send a message with the document context
           const firstDoc = documents[0];
           if (firstDoc?.documentId && firstDoc?.summary) {
@@ -370,58 +356,6 @@ function PureMultimodalInput({
             ]);
           }
         }
-
-        // Fallback: generate quiz offers for non-PDF documents
-        const documentIds = documents.map((doc) => doc.documentId);
-
-        const [easyQuiz, hardQuiz] = await Promise.all([
-          generateQuiz({ documentIds, difficulty: "easy" }),
-          generateQuiz({ documentIds, difficulty: "hard" }),
-        ]);
-
-        const quizPayload: QuizOfferPayload = {
-          easy: {
-            quizId: easyQuiz.quizId,
-            count: easyQuiz.count,
-            title: easyQuiz.title,
-          },
-          hard: {
-            quizId: hardQuiz.quizId,
-            count: hardQuiz.count,
-            title: hardQuiz.title,
-          },
-        };
-
-        const now = new Date().toISOString();
-
-        setMessages((currentMessages) => [
-          ...currentMessages,
-          {
-            id: generateUUID(),
-            role: "assistant",
-            name: "quiz-offer",
-            metadata: { createdAt: now },
-            parts: [
-              {
-                type: "data-quizOffer",
-                data: quizPayload,
-              },
-            ],
-          },
-        ]);
-
-        setAttachments([]);
-        setLocalStorageInput("");
-        resetHeight();
-        setInput("");
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-        if (width && width > 768) {
-          textareaRef.current?.focus();
-        }
-
-        toast.success("Document processed. Pick a quiz difficulty to begin.");
       } catch (error) {
         console.error("Failed to process attachments", error);
         toast.error(
@@ -697,7 +631,7 @@ function PureMultimodalInput({
             "Preparing for analysis...",
           ];
 
-          for (let i = 0; i < imageSteps.length; i++) {
+          for (let i = 0; i <imageSteps.length; i++) {
             setProcessingStep(imageSteps[i]);
             await new Promise((resolve) => setTimeout(resolve, 1200));
           }
@@ -787,7 +721,7 @@ function PureMultimodalInput({
 
   // Debug: log to see what's happening
   if (typeof window !== "undefined") {
-    console.log("SuggestedActions render check:", {
+    console.log("render check:", {
       messagesLength: messages.length,
       attachmentsLength: attachments.length,
       uploadQueueLength: uploadQueue.length,
@@ -798,17 +732,6 @@ function PureMultimodalInput({
 
   return (
     <div className={cn("relative flex w-full flex-col gap-4", className)}>
-      {messages.length > 0 &&
-        attachments.length === 0 &&
-        uploadQueue.length === 0 && (
-          <SuggestedActions
-            chatId={chatId}
-            documentId={extractedDocumentId}
-            selectedVisibilityType={selectedVisibilityType}
-            sendMessage={sendMessage}
-          />
-        )}
-
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-blue-500 border-dashed bg-blue-50/80 dark:bg-blue-950/80">
           <div className="text-center">

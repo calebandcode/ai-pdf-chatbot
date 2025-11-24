@@ -1,8 +1,15 @@
 import equal from "fast-deep-equal";
-import { memo } from "react";
+import { BookmarkIcon, BookmarkCheckIcon } from "lucide-react";
+import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { useCopyToClipboard } from "usehooks-ts";
+import {
+  checkIfMessageIsSaved,
+  saveBlockToNotebookAction,
+  unsaveBlockAction,
+} from "@/app/actions/save-block";
+import type { ChatContext } from "@/lib/db/schema";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
 import { Action, Actions } from "./elements/actions";
@@ -23,6 +30,98 @@ export function PureMessageActions({
 }) {
   const { mutate } = useSWRConfig();
   const [_, copyToClipboard] = useCopyToClipboard();
+  const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [chatContext, setChatContext] = useState<ChatContext | null>(null);
+
+  // Check if message is already saved
+  useEffect(() => {
+    if (message.role === "assistant" && message.id) {
+      checkIfMessageIsSaved(message.id)
+        .then((result) => {
+          if (result.success) {
+            setIsSaved(result.isSaved || false);
+          }
+        })
+        .catch((error) => {
+          // Gracefully handle errors (e.g., table doesn't exist yet)
+          // Don't break the UI - just assume message is not saved
+          console.warn("Failed to check if message is saved:", error);
+          setIsSaved(false);
+        });
+    }
+  }, [message.id, message.role]);
+
+  // Fetch chat context for topics
+  useEffect(() => {
+    if (message.role === "assistant") {
+      fetch(`/api/chat/${chatId}/context`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.context) {
+            setChatContext(data.context);
+          }
+        })
+        .catch(() => {
+          // Ignore errors
+        });
+    }
+  }, [chatId, message.role]);
+
+  const handleSaveToNotebook = async () => {
+    if (isSaving || isSaved) return;
+
+    setIsSaving(true);
+    try {
+      const result = await saveBlockToNotebookAction({
+        chatId,
+        messageId: message.id,
+        blockType: "explanation", // Default, can be improved
+        documentIds: [], // Can be extracted from message if needed
+      });
+
+      if (result.success) {
+        setIsSaved(true);
+        toast.success("Saved to notebook!");
+        // Trigger refresh for Edit Mode
+        window.dispatchEvent(
+          new CustomEvent("refresh-messages", { detail: { chatId } })
+        );
+      } else {
+        toast.error(result.error || "Failed to save");
+      }
+    } catch (error) {
+      console.error("Failed to save block:", error);
+      toast.error("Failed to save to notebook");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUnsave = async () => {
+    if (isSaving || !isSaved) return;
+
+    setIsSaving(true);
+    try {
+      const result = await unsaveBlockAction({ messageId: message.id });
+
+      if (result.success) {
+        setIsSaved(false);
+        toast.success("Removed from notebook");
+        // Trigger refresh for Edit Mode
+        window.dispatchEvent(
+          new CustomEvent("refresh-messages", { detail: { chatId } })
+        );
+      } else {
+        toast.error(result.error || "Failed to unsave");
+      }
+    } catch (error) {
+      console.error("Failed to unsave block:", error);
+      toast.error("Failed to remove from notebook");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   if (isLoading) {
     return null;
@@ -71,6 +170,21 @@ export function PureMessageActions({
       <Action onClick={handleCopy} tooltip="Copy">
         <CopyIcon />
       </Action>
+
+      {/* Save to Notebook button - only for assistant messages */}
+      {message.role === "assistant" && (
+        <Action
+          onClick={isSaved ? handleUnsave : handleSaveToNotebook}
+          disabled={isSaving}
+          tooltip={isSaved ? "Remove from notebook" : "Save to notebook"}
+        >
+          {isSaved ? (
+            <BookmarkCheckIcon className="h-4 w-4 fill-current" />
+          ) : (
+            <BookmarkIcon className="h-4 w-4" />
+          )}
+        </Action>
+      )}
 
       <Action
         data-testid="message-upvote"

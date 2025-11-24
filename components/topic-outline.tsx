@@ -17,17 +17,11 @@ import {
 } from "@/app/actions/generate-explanations";
 import { generateUnifiedQuiz } from "@/app/actions/generate-unified-quiz";
 import { startGuidedSession } from "@/app/actions/tutor-session";
-import { ContextualChatModal } from "@/components/contextual-chat-modal";
 import { Response } from "@/components/elements/response";
 import { Suggestion } from "@/components/elements/suggestion";
 import { FloatingBubble } from "@/components/floating-bubble";
 import { SkeletonBlock } from "@/components/loading/skeleton-loaders";
-import { NoteManager } from "@/components/note-manager";
-import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
-import { TextSelectionBubble } from "@/components/text-selection-bubble";
-import { TipsCollection } from "@/components/tips-collection";
 import { useBubble } from "@/hooks/use-bubble";
-import { useTips } from "@/hooks/use-tips";
 import type {
   DocumentQuizContext,
   SubtopicQuizContext,
@@ -46,11 +40,12 @@ const LoadingSkeleton = () => (
 
 type Topic = {
   topic: string;
-  description: string;
-  pages: number[];
+  description?: string;
+  pages?: number[];
   subtopics?: Array<{
     subtopic: string;
-    pages: number[];
+    description?: string;
+    pages?: number[];
   }>;
 };
 
@@ -67,12 +62,90 @@ export function TopicOutline({
   chatId,
   documentTitle,
 }: TopicOutlineProps) {
-  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
+  // Persist expanded topics in localStorage
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const stored = localStorage.getItem(`expandedTopics_${chatId}`);
+      if (stored) {
+        return new Set(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.warn("Failed to load expanded topics from localStorage:", error);
+    }
+    return new Set();
+  });
+
+  // Save expanded topics to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        `expandedTopics_${chatId}`,
+        JSON.stringify(Array.from(expandedTopics))
+      );
+    } catch (error) {
+      console.warn("Failed to save expanded topics to localStorage:", error);
+    }
+  }, [expandedTopics, chatId]);
   const [loadingStates, setLoadingStates] = useState<Set<string>>(new Set());
-  const [topicContent, setTopicContent] = useState<Record<string, string>>({});
+
+  // Persist topic explanations in localStorage
+  const [topicContent, setTopicContent] = useState<Record<string, string>>(
+    () => {
+      if (typeof window === "undefined") return {};
+      try {
+        const stored = localStorage.getItem(`topicContent_${chatId}`);
+        if (stored) {
+          return JSON.parse(stored);
+        }
+      } catch (error) {
+        console.warn("Failed to load topic content from localStorage:", error);
+      }
+      return {};
+    }
+  );
+
   const [subtopicContent, setSubtopicContent] = useState<
     Record<string, string>
-  >({});
+  >(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const stored = localStorage.getItem(`subtopicContent_${chatId}`);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (error) {
+      console.warn("Failed to load subtopic content from localStorage:", error);
+    }
+    return {};
+  });
+
+  // Save topic content to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        `topicContent_${chatId}`,
+        JSON.stringify(topicContent)
+      );
+    } catch (error) {
+      console.warn("Failed to save topic content to localStorage:", error);
+    }
+  }, [topicContent, chatId]);
+
+  // Save subtopic content to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        `subtopicContent_${chatId}`,
+        JSON.stringify(subtopicContent)
+      );
+    } catch (error) {
+      console.warn("Failed to save subtopic content to localStorage:", error);
+    }
+  }, [subtopicContent, chatId]);
   const [streamedContent, setStreamedContent] = useState<Set<string>>(
     new Set()
   );
@@ -81,40 +154,123 @@ export function TopicOutline({
     currentIndex: 0,
   });
 
-  // Text selection features
-  const [showTipsCollection, setShowTipsCollection] = useState(false);
-  const [showQuizModal, setShowQuizModal] = useState(false);
-  const [selectedText, setSelectedText] = useState("");
-  const [quizSource, setQuizSource] = useState<string | undefined>();
+  // Load explanations from messages on mount and when messages refresh
+  useEffect(() => {
+    const loadExplanationsFromMessages = async () => {
+      try {
+        const response = await fetch(`/api/chat/${chatId}/messages`);
+        if (!response.ok) return;
 
-  // Topic chat features
-  const [showTopicChat, setShowTopicChat] = useState(false);
-  const [topicChatContext, setTopicChatContext] = useState<{
-    type: "topic" | "subtopic";
-    name: string;
-    description: string;
-    pages: number[];
-    parentTopic?: string;
-    clickPosition?: {
-      x: number;
-      y: number;
+        const messages = await response.json();
+        const loadedTopicContent: Record<string, string> = {};
+        const loadedSubtopicContent: Record<string, string> = {};
+        const topicsToExpand = new Set<string>();
+
+        // Extract explanations from messages
+        // Messages from API are DBMessage[] format, which has the same structure as ChatMessage
+        for (const msg of messages) {
+          if (msg.role === "assistant" && Array.isArray(msg.parts)) {
+            const topicExplanationPart = msg.parts.find(
+              (p: { type?: string }) => p.type === "data-topicExplanation"
+            );
+
+            if (topicExplanationPart) {
+              const data = (
+                topicExplanationPart as {
+                  data?: {
+                    topicName?: string;
+                    isSubtopic?: boolean;
+                    parentTopic?: string;
+                  };
+                }
+              ).data;
+              const textPart = msg.parts.find(
+                (p: { type?: string; text?: string }) => p.type === "text"
+              );
+
+              if (data?.topicName && textPart?.text) {
+                if (data.isSubtopic) {
+                  loadedSubtopicContent[data.topicName] = textPart.text;
+                  // Also expand parent topic if subtopic has explanation
+                  if (data.parentTopic) {
+                    topicsToExpand.add(data.parentTopic);
+                  }
+                } else {
+                  loadedTopicContent[data.topicName] = textPart.text;
+                  topicsToExpand.add(data.topicName);
+                }
+              }
+            }
+          }
+        }
+
+        // Update state with loaded explanations (merge with localStorage data)
+        if (Object.keys(loadedTopicContent).length > 0) {
+          setTopicContent((prev) => {
+            const merged = { ...prev, ...loadedTopicContent };
+            // Also save to localStorage immediately
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem(
+                  `topicContent_${chatId}`,
+                  JSON.stringify(merged)
+                );
+              } catch (error) {
+                console.warn(
+                  "Failed to save topic content to localStorage:",
+                  error
+                );
+              }
+            }
+            return merged;
+          });
+        }
+        if (Object.keys(loadedSubtopicContent).length > 0) {
+          setSubtopicContent((prev) => {
+            const merged = { ...prev, ...loadedSubtopicContent };
+            // Also save to localStorage immediately
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem(
+                  `subtopicContent_${chatId}`,
+                  JSON.stringify(merged)
+                );
+              } catch (error) {
+                console.warn(
+                  "Failed to save subtopic content to localStorage:",
+                  error
+                );
+              }
+            }
+            return merged;
+          });
+        }
+
+        // Auto-expand topics that have explanations
+        if (topicsToExpand.size > 0) {
+          setExpandedTopics((prev) => {
+            const newSet = new Set(prev);
+            topicsToExpand.forEach((topic) => newSet.add(topic));
+            return newSet;
+          });
+        }
+      } catch (error) {
+        console.warn("Failed to load explanations from messages:", error);
+      }
     };
-  } | null>(null);
 
-  // Store topic conversations
-  const [topicConversations, setTopicConversations] = useState<
-    Record<
-      string,
-      Array<{
-        id: string;
-        question: string;
-        answer: string;
-        timestamp: Date;
-      }>
-    >
-  >({});
+    loadExplanationsFromMessages();
 
-  const { tips, deleteTip } = useTips();
+    // Also listen for message refresh events
+    const handleRefresh = () => {
+      loadExplanationsFromMessages();
+    };
+
+    window.addEventListener("refresh-messages", handleRefresh);
+    return () => {
+      window.removeEventListener("refresh-messages", handleRefresh);
+    };
+  }, [chatId]);
 
   // Bubble system
   const { isOpen, bubbleData, position, bubbleRef, openBubble, closeBubble } =
@@ -142,7 +298,16 @@ export function TopicOutline({
           chatId,
           documentTitle: documentTitle || "Document",
           allPages,
-          allTopics: topics || [],
+          allTopics: (topics || []).map((t) => ({
+            topic: t.topic,
+            description: t.description || "",
+            pages: t.pages || [],
+            subtopics: t.subtopics?.map((st) => ({
+              subtopic: st.subtopic,
+              description: (st as { description?: string }).description,
+              pages: st.pages || [],
+            })),
+          })),
           documentSummary: "",
           questionCount: 8,
           difficulty: "mixed",
@@ -179,84 +344,6 @@ export function TopicOutline({
   const handleHighlight = (_text: string, _range: Range) => {
     console.log("Highlighting text:", _text);
     // The highlighting is already handled in the TextSelectionBubble component
-  };
-
-  const handleQuizMe = (text: string) => {
-    setSelectedText(text);
-    setQuizSource(documentTitle || "Topic Outline");
-    setShowQuizModal(true);
-  };
-
-  const handleQuizFromTip = (text: string) => {
-    setSelectedText(text);
-    setQuizSource("Saved Tip");
-    setShowQuizModal(true);
-  };
-
-  const handleAskAboutTopic = (
-    event: React.MouseEvent,
-    topic: string,
-    description: string,
-    pages: number[]
-  ) => {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setTopicChatContext({
-      type: "topic",
-      name: topic,
-      description,
-      pages,
-      clickPosition: {
-        x: rect.left + rect.width / 2,
-        y: rect.bottom + 8,
-      },
-    });
-    setShowTopicChat(true);
-  };
-
-  const handleAskAboutSubtopic = (
-    event: React.MouseEvent,
-    subtopic: string,
-    description: string,
-    pages: number[],
-    parentTopic: string
-  ) => {
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setTopicChatContext({
-      type: "subtopic",
-      name: subtopic,
-      description,
-      pages,
-      parentTopic,
-      clickPosition: {
-        x: rect.left + rect.width / 2,
-        y: rect.bottom + 8,
-      },
-    });
-    setShowTopicChat(true);
-  };
-
-  const handleSaveConversation = (conversation: {
-    id: string;
-    question: string;
-    answer: string;
-    timestamp: Date;
-  }) => {
-    if (!topicChatContext) return;
-
-    const topicKey = getTopicKey(topicChatContext);
-    setTopicConversations((prev) => ({
-      ...prev,
-      [topicKey]: [...(prev[topicKey] || []), conversation],
-    }));
-  };
-
-  const getTopicKey = (context: typeof topicChatContext) => {
-    if (!context) return "";
-    return context.type === "subtopic"
-      ? `${context.parentTopic}-${context.name}`
-      : context.name;
   };
 
   const handleQuizBubble = async (
@@ -301,7 +388,12 @@ export function TopicOutline({
         scope: "topic",
         topicName: topic,
         topicPages: pages,
-        allSubtopics: topics.find((t) => t.topic === topic)?.subtopics || [],
+        allSubtopics: (
+          topics.find((t) => t.topic === topic)?.subtopics || []
+        ).map((st) => ({
+          subtopic: st.subtopic,
+          pages: st.pages || [],
+        })),
         topicContent: content,
         rawContent: "", // Will be fetched by the action
         questionCount: 5,
@@ -353,6 +445,7 @@ export function TopicOutline({
           currentIndex: conversationContext.currentIndex,
           totalTopics: topics.length,
           documentIds,
+          chatId, // Pass chatId to save explanation as message
         });
         content = result.explanation;
         // Update state for future use
@@ -360,6 +453,11 @@ export function TopicOutline({
           ...prev,
           [subtopic]: content,
         }));
+
+        // Trigger message refresh so Edit Mode can see the new explanation
+        window.dispatchEvent(
+          new CustomEvent("refresh-messages", { detail: { chatId } })
+        );
       }
 
       // Create subtopic quiz context
@@ -517,6 +615,7 @@ export function TopicOutline({
         currentIndex: conversationContext.currentIndex,
         totalTopics: topics.length,
         documentIds,
+        chatId, // Pass chatId to save explanation as message
       });
 
       setTopicContent((prev) => ({
@@ -526,6 +625,11 @@ export function TopicOutline({
 
       // Mark as newly generated for streaming animation
       setStreamedContent((prev) => new Set(prev).add(`topic-${topicName}`));
+
+      // Trigger message refresh so Edit Mode can see the new explanation
+      window.dispatchEvent(
+        new CustomEvent("refresh-messages", { detail: { chatId } })
+      );
 
       // Update conversation context
       setConversationContext((prev) => ({
@@ -586,12 +690,14 @@ export function TopicOutline({
       const result = await generateSubtopicExplanationAction({
         parentTopic: parentTopic.topic,
         subtopicName,
+        description: subtopicData.description, // Pass subtopic description
         pages: subtopicData.pages,
         documentTitle,
         previousTopics: conversationContext.topicsCovered,
         currentIndex: conversationContext.currentIndex,
         totalTopics: topics.length,
         documentIds,
+        chatId, // Pass chatId to save explanation as message
       });
 
       setSubtopicContent((prev) => ({
@@ -602,6 +708,11 @@ export function TopicOutline({
       // Mark as streamed for first-time animation
       setStreamedContent((prev) =>
         new Set(prev).add(`subtopic-${subtopicName}`)
+      );
+
+      // Trigger message refresh so Edit Mode can see the new explanation
+      window.dispatchEvent(
+        new CustomEvent("refresh-messages", { detail: { chatId } })
       );
 
       // Update conversation context for subtopics
@@ -883,31 +994,6 @@ export function TopicOutline({
                           >
                             {sanitizeText(topicContent[topic.topic])}
                           </Response>
-
-                          {/* Ask about this topic button - appears after content is generated */}
-                          <div className="mt-3 flex justify-start">
-                            <motion.div
-                              animate={{ opacity: 1, y: 0 }}
-                              initial={{ opacity: 0, y: 10 }}
-                              transition={{ duration: 0.2, delay: 0.1 }}
-                            >
-                              <button
-                                className="mb-3.5 flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 text-gray-700 text-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
-                                onClick={(e) =>
-                                  handleAskAboutTopic(
-                                    e,
-                                    topic.topic,
-                                    topic.description,
-                                    topic.pages
-                                  )
-                                }
-                                type="button"
-                              >
-                                <MessageCircle className="h-4 w-4 text-gray-600" />
-                                <span>Ask Questions</span>
-                              </button>
-                            </motion.div>
-                          </div>
                         </div>
                       ) : (
                         <p className="mb-3 text-gray-500 text-sm">
@@ -1093,36 +1179,7 @@ export function TopicOutline({
 
                                   {/* Action Buttons - Natural Positioning */}
                                   {subtopicContent[subtopic.subtopic] && (
-                                    <div className="flex items-center justify-between">
-                                      {/* Left side - Ask about this subtopic */}
-                                      <div className="flex gap-2">
-                                        <motion.div
-                                          animate={{ opacity: 1, y: 0 }}
-                                          initial={{ opacity: 0, y: 10 }}
-                                          transition={{
-                                            duration: 0.2,
-                                            delay: 0.1,
-                                          }}
-                                        >
-                                          <button
-                                            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-700 text-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
-                                            onClick={(e) =>
-                                              handleAskAboutSubtopic(
-                                                e,
-                                                subtopic.subtopic,
-                                                subtopic.subtopic, // Using subtopic name as description for now
-                                                subtopic.pages,
-                                                topic.topic
-                                              )
-                                            }
-                                            type="button"
-                                          >
-                                            <MessageCircle className="h-4 w-4 text-blue-600" />
-                                            <span>Ask about this subtopic</span>
-                                          </button>
-                                        </motion.div>
-                                      </div>
-
+                                    <div className="flex items-center justify-end">
                                       {/* Right side - Quiz */}
                                       <div className="flex gap-2">
                                         <Suggestion
@@ -1179,64 +1236,7 @@ export function TopicOutline({
         ref={bubbleRef}
       />
 
-      {/* Note Manager - wraps components that need note functionality */}
-      <NoteManager source={documentTitle || "Topic Outline"}>
-        {(requestNote) => (
-          <TextSelectionBubble
-            onAddNote={(text, range, position) => {
-              requestNote(text, range, position);
-            }}
-            onHighlight={handleHighlight}
-            onQuizMe={handleQuizMe}
-            source={documentTitle || "Topic Outline"}
-          />
-        )}
-      </NoteManager>
-
-      {/* Tips Collection Modal */}
-      <TipsCollection
-        isOpen={showTipsCollection}
-        onClose={() => setShowTipsCollection(false)}
-        onDeleteTip={deleteTip}
-        onQuizFromTip={handleQuizFromTip}
-        tips={tips}
-      />
-
-      {/* Quiz from Text Modal */}
-      <QuizFromTextModal
-        isOpen={showQuizModal}
-        onClose={() => setShowQuizModal(false)}
-        selectedText={selectedText}
-        source={quizSource}
-      />
-
-      {/* Topic Chat Modal */}
-      {topicChatContext && (
-        <ContextualChatModal
-          clickPosition={topicChatContext.clickPosition}
-          context={{
-            selectedText: topicChatContext.name,
-            surroundingContext: topicChatContext.description,
-            sourceTitle:
-              topicChatContext.type === "subtopic"
-                ? `${topicChatContext.parentTopic} - ${topicChatContext.name}`
-                : topicChatContext.name,
-            sourceType: "text",
-            sourceId: `${topicChatContext.type}-${topicChatContext.name}`,
-          }}
-          isOpen={showTopicChat}
-          onClose={() => {
-            setShowTopicChat(false);
-            setTopicChatContext(null);
-          }}
-          onSaveConversation={handleSaveConversation}
-          previousQuestions={
-            topicConversations[getTopicKey(topicChatContext)]?.map(
-              (conv) => conv.question
-            ) || []
-          }
-        />
-      )}
+      {/* Selection and contextual chat tools are hidden in the game-focused pivot */}
     </div>
   );
 }

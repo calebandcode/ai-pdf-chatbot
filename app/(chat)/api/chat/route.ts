@@ -278,6 +278,9 @@ export async function POST(request: Request) {
           title,
           visibility: selectedVisibilityType,
         });
+        
+        // Fetch chat again to get default difficultyLevel
+        chat = await getChatById({ id });
       }
 
       messagesFromDb = await getMessagesByChatId({ id });
@@ -404,6 +407,9 @@ export async function POST(request: Request) {
 
     const stream = createUIMessageStream({
       execute: ({ writer: dataStream }) => {
+        const difficultyLevel =
+          (chat?.difficultyLevel as "age12" | "age15" | "university") ?? "university";
+
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
           system:
@@ -411,6 +417,7 @@ export async function POST(request: Request) {
               selectedChatModel,
               requestHints,
               hasDocumentContext,
+              difficultyLevel,
             }) + (documentContext ? `\n\n${documentContext}` : ""),
           messages: convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),

@@ -1,29 +1,19 @@
 import type { UseChatHelpers } from "@ai-sdk/react";
 import equal from "fast-deep-equal";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDownIcon, Sparkles } from "lucide-react";
+import { ArrowDownIcon } from "lucide-react";
 import { memo, useEffect, useState } from "react";
+import type { ChatContext } from "@/lib/db/schema";
 import { useFont } from "@/contexts/font-context";
 import { useMessages } from "@/hooks/use-messages";
-import { useTips } from "@/hooks/use-tips";
 import type { Vote } from "@/lib/db/schema";
 import type { ChatMessage } from "@/lib/types";
-import {
-  ContextualChatModal,
-  type SelectionContext,
-} from "./contextual-chat-modal";
 import { useDataStream } from "./data-stream-provider";
 import { DynamicGreeting } from "./dynamic-greeting";
 import { Conversation, ConversationContent } from "./elements/conversation";
 import { MagnifyingGlass } from "./magnifying-glass";
-import { PreviewMessage } from "./message";
-import { NoteManager } from "./note-manager";
+import { PreviewMessage, ThinkingMessage } from "./message";
 import { NotebookCards } from "./notebook-cards";
-import { QuizFromTextModal } from "./quiz-from-text-modal";
-import { ReadingControlsBar } from "./reading-controls-bar";
-import { AIThinking } from "./streaming/typing-indicator";
-import { TextSelectionBubble } from "./text-selection-bubble";
-import { TipsCollection } from "./tips-collection";
 
 type MessagesProps = {
   chatId: string;
@@ -52,43 +42,45 @@ function PureMessages({
     endRef: messagesEndRef,
     isAtBottom,
     scrollToBottom,
-    hasSentMessage,
   } = useMessages({
     status,
   });
+  
+  // Track first source documentId to filter out additional sources
+  const [firstSourceId, setFirstSourceId] = useState<string | null>(null);
+  
+  // Fetch chat context to determine first source
+  useEffect(() => {
+    const fetchContext = async () => {
+      try {
+        const response = await fetch(`/api/chat/${chatId}/context`);
+        if (response.ok) {
+          const payload = await response.json();
+          const context = payload.context;
+          if (context?.sources && context.sources.length > 0) {
+            // First source is the first one in the array
+            setFirstSourceId(context.sources[0]?.documentId || null);
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to fetch chat context:", error);
+      }
+    };
+    
+    fetchContext();
+    
+    // Also listen for refresh events
+    const handleRefresh = () => {
+      fetchContext();
+    };
+    
+    window.addEventListener("refresh-messages", handleRefresh);
+    return () => {
+      window.removeEventListener("refresh-messages", handleRefresh);
+    };
+  }, [chatId]);
 
-  // Text selection features
-  const [showTipsCollection, setShowTipsCollection] = useState(false);
-  const [showQuizModal, setShowQuizModal] = useState(false);
-  const [showContextualChat, setShowContextualChat] = useState(false);
-  const [selectedText, setSelectedText] = useState("");
-  const [quizSource, setQuizSource] = useState<string | undefined>();
-  const [chatContext, setChatContext] = useState<SelectionContext | null>(null);
-
-  const { tips, deleteTip } = useTips();
   const { fontFamily, fontSize } = useFont();
-
-  // Text selection handlers
-  const handleHighlight = () => {
-    // The highlighting is already handled in the TextSelectionBubble component
-  };
-
-  const handleQuizMe = (text: string) => {
-    setSelectedText(text);
-    setQuizSource("Chat");
-    setShowQuizModal(true);
-  };
-
-  const handleQuizFromTip = (text: string) => {
-    setSelectedText(text);
-    setQuizSource("Saved Tip");
-    setShowQuizModal(true);
-  };
-
-  const handleAskAboutThis = (_text: string, context: SelectionContext) => {
-    setChatContext(context);
-    setShowContextualChat(true);
-  };
 
   useDataStream();
 
@@ -114,7 +106,7 @@ function PureMessages({
         overflowAnchor: "none",
         scrollBehavior: "smooth",
         scrollPaddingTop: "1rem",
-        scrollPaddingBottom: "1rem",
+        scrollPaddingBottom: "8rem", // Match pb-32 to account for fixed input
       }}
     >
       {/* Bottom Fade Edge - Only show on chat page (when there are messages) */}
@@ -123,7 +115,7 @@ function PureMessages({
       )}
       <Conversation className="mx-auto flex min-w-0 max-w-4xl flex-col gap-4 md:gap-6">
         <ConversationContent
-          className="flex flex-col gap-4 px-2 py-4 transition-all md:gap-6 md:px-4"
+          className="flex flex-col gap-4 px-2 py-4 pb-32 transition-all md:gap-6 md:px-4"
           style={{
             fontSize: `${fontSize}px`,
             fontFamily:
@@ -140,56 +132,102 @@ function PureMessages({
         >
           {messages.length === 0 && (
             <>
-              <DynamicGreeting />
               <div className="mt-8">
                 <NotebookCards />
               </div>
             </>
           )}
 
-          {messages.map((message, index) => (
-            <PreviewMessage
-              chatId={chatId}
-              isLoading={
-                status === "streaming" && messages.length - 1 === index
+          {/* Render messages - filter out topic explanations and additional sources */}
+          {messages
+            .filter((message) => {
+              // Filter out messages that are topic explanations
+              // These should only appear in topic expansions and Edit Mode
+              const hasTopicExplanation = message.parts?.some(
+                (p) => (p as { type?: string }).type === "data-topicExplanation"
+              );
+              if (hasTopicExplanation) {
+                return false;
               }
-              isReadonly={isReadonly}
-              key={message.id}
-              message={message}
-              regenerate={regenerate}
-              requiresScrollPadding={
-                hasSentMessage && index === messages.length - 1
+              
+              // Filter out additional source messages (Option B: only first source should be displayed)
+              const hasPdfUpload = message.parts?.some(
+                (p) => (p as { type?: string }).type === "data-pdfUpload"
+              );
+              if (hasPdfUpload && firstSourceId) {
+                // Check if this message's documentId matches the first source
+                const pdfUploadPart = message.parts?.find(
+                  (p) => (p as { type?: string }).type === "data-pdfUpload"
+                );
+                if (pdfUploadPart) {
+                  const data = (pdfUploadPart as { data?: { documentId?: string } }).data;
+                  const documentId = data?.documentId;
+                  // Only show if this is the first source, or if we haven't determined first source yet
+                  if (documentId && documentId !== firstSourceId) {
+                    return false; // Hide additional sources
+                  }
+                }
               }
-              setMessages={setMessages}
-              vote={
-                votes
-                  ? votes.find((vote) => vote.messageId === message.id)
-                  : undefined
-              }
-            />
-          ))}
+              
+              return true;
+            })
+            .map((message, index) => {
+              // Recalculate index after filtering
+              const filteredMessages = messages.filter((m) => {
+                const hasTopicExplanation = m.parts?.some(
+                  (p) => (p as { type?: string }).type === "data-topicExplanation"
+                );
+                if (hasTopicExplanation) {
+                  return false;
+                }
+                
+                // Filter out additional sources
+                const hasPdfUpload = m.parts?.some(
+                  (p) => (p as { type?: string }).type === "data-pdfUpload"
+                );
+                if (hasPdfUpload && firstSourceId) {
+                  const pdfUploadPart = m.parts?.find(
+                    (p) => (p as { type?: string }).type === "data-pdfUpload"
+                  );
+                  if (pdfUploadPart) {
+                    const data = (pdfUploadPart as { data?: { documentId?: string } }).data;
+                    const documentId = data?.documentId;
+                    if (documentId && documentId !== firstSourceId) {
+                      return false;
+                    }
+                  }
+                }
+                
+                return true;
+              });
+              
+              return (
+                <PreviewMessage
+                  chatId={chatId}
+                  isLoading={
+                    status === "streaming" && index === filteredMessages.length - 1
+                  }
+                  isReadonly={isReadonly}
+                  key={message.id}
+                  message={message}
+                  regenerate={regenerate}
+                  requiresScrollPadding={
+                    filteredMessages.length > 0 && index === filteredMessages.length - 1
+                  }
+                  setMessages={setMessages}
+                  vote={
+                    votes
+                      ? votes.find((vote) => vote.messageId === message.id)
+                      : undefined
+                  }
+                />
+              );
+            })}
 
           {status === "submitted" &&
             messages.length > 0 &&
             messages.at(-1)?.role === "user" &&
-            selectedModelId !== "chat-model-reasoning" && (
-              <motion.div
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-3"
-                exit={{ opacity: 0, y: -10 }}
-                initial={{ opacity: 0, y: 10 }}
-                transition={{ duration: 0.3 }}
-              >
-                <div className="-mt-1 flex size-8 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border">
-                  <Sparkles size={14} />
-                </div>
-                <div className="flex w-full flex-col gap-2 md:gap-4">
-                  <div className="p-0 text-muted-foreground text-sm">
-                    <AIThinking message="AI is thinking..." />
-                  </div>
-                </div>
-              </motion.div>
-            )}
+            selectedModelId !== "chat-model-reasoning" && <ThinkingMessage />}
 
           <div
             className="min-h-[24px] min-w-[24px] shrink-0"
@@ -217,53 +255,10 @@ function PureMessages({
         )}
       </AnimatePresence>
 
-      {/* Reading Controls Bar */}
-      <ReadingControlsBar
-        onTipsClick={() => setShowTipsCollection(true)}
-        tipsCount={tips.length}
-      />
+      {/* Reading Controls Bar - Removed (mode toggle moved to HybridNotebookView) */}
 
       {/* Magnifying Glass */}
       <MagnifyingGlass />
-
-      {/* Note Manager - wraps components that need note functionality */}
-      <NoteManager source="Chat">
-        {(requestNote) => (
-          <TextSelectionBubble
-            onAddNote={(text, range, position) => {
-              requestNote(text, range, position);
-            }}
-            onAskAboutThis={handleAskAboutThis}
-            onHighlight={handleHighlight}
-            onQuizMe={handleQuizMe}
-            source="Chat"
-          />
-        )}
-      </NoteManager>
-
-      {/* Tips Collection Modal */}
-      <TipsCollection
-        isOpen={showTipsCollection}
-        onClose={() => setShowTipsCollection(false)}
-        onDeleteTip={deleteTip}
-        onQuizFromTip={handleQuizFromTip}
-        tips={tips}
-      />
-
-      {/* Quiz from Text Modal */}
-      <QuizFromTextModal
-        isOpen={showQuizModal}
-        onClose={() => setShowQuizModal(false)}
-        selectedText={selectedText}
-        source={quizSource}
-      />
-
-      {/* Contextual Chat Modal */}
-      <ContextualChatModal
-        context={chatContext}
-        isOpen={showContextualChat}
-        onClose={() => setShowContextualChat(false)}
-      />
     </div>
   );
 }

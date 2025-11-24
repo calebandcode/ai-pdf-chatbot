@@ -1,7 +1,9 @@
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 import {
   boolean,
+  doublePrecision,
   foreignKey,
+  index,
   integer,
   json,
   jsonb,
@@ -35,6 +37,11 @@ export const chat = pgTable("Chat", {
     .notNull()
     .default("private"),
   lastContext: jsonb("lastContext").$type<AppUsage | null>(),
+  difficultyLevel: varchar("difficultyLevel", {
+    enum: ["age12", "age15", "university"],
+  })
+    .notNull()
+    .default("university"),
 });
 
 export type Chat = InferSelectModel<typeof chat>;
@@ -239,6 +246,13 @@ export const questions = pgTable("questions", {
   explanation: text("explanation").notNull(),
   rationales: jsonb("rationales").notNull(),
   sourceRefs: jsonb("source_refs").notNull(),
+  memoryStability: doublePrecision("memory_stability").default(0),
+  memoryDifficulty: doublePrecision("memory_difficulty").default(0),
+  elapsedDays: integer("elapsed_days").default(0),
+  scheduledDays: integer("scheduled_days").default(0),
+  lastReview: timestamp("last_review", { withTimezone: true }),
+  reps: integer("reps").default(0),
+  state: integer("state").default(0),
 });
 
 export type Question = InferSelectModel<typeof questions>;
@@ -359,6 +373,235 @@ export const documentSummaries = pgTable("document_summaries", {
 export type DocumentSummary = InferSelectModel<typeof documentSummaries>;
 export type NewDocumentSummary = InferInsertModel<typeof documentSummaries>;
 
+export const courses = pgTable("courses", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  userId: text("user_id").notNull(),
+  documentId: uuid("document_id").references(() => documents.id, {
+    onDelete: "cascade",
+  }),
+  title: text("title").notNull(),
+  sourceType: varchar("source_type", {
+    enum: ["pdf", "link", "youtube"],
+  })
+    .notNull()
+    .default("pdf"),
+  sourceUrl: text("source_url"),
+  totalXp: integer("total_xp").default(0).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type Course = InferSelectModel<typeof courses>;
+export type NewCourse = InferInsertModel<typeof courses>;
+
+export const units = pgTable("units", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  courseId: uuid("course_id")
+    .notNull()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  orderIndex: integer("order_index").notNull(),
+  title: text("title").notNull(),
+  summary: text("summary"),
+  isUnlocked: boolean("is_unlocked").default(false).notNull(),
+  slideCount: integer("slide_count").default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type Unit = InferSelectModel<typeof units>;
+export type NewUnit = InferInsertModel<typeof units>;
+
+export const unitSlides = pgTable("unit_slides", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  unitId: uuid("unit_id")
+    .notNull()
+    .references(() => units.id, { onDelete: "cascade" }),
+  orderIndex: integer("order_index").notNull(),
+  type: varchar("type", { enum: ["learn", "quiz"] }).notNull(),
+  content: jsonb("content").notNull(),
+  citation: text("citation"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type UnitSlide = InferSelectModel<typeof unitSlides>;
+export type NewUnitSlide = InferInsertModel<typeof unitSlides>;
+
+export const userProgress = pgTable("user_progress", {
+  userId: text("user_id").primaryKey().notNull(),
+  totalXp: integer("total_xp").default(0).notNull(),
+  hearts: integer("hearts").default(5).notNull(),
+  streakCurrent: integer("streak_current").default(0).notNull(),
+  streakBest: integer("streak_best").default(0).notNull(),
+  lastPlayedDate: timestamp("last_played_date", { withTimezone: true }),
+  unlockedUnits: jsonb("unlocked_units")
+    .$type<Record<string, number>>()
+    .default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type UserProgress = InferSelectModel<typeof userProgress>;
+export type NewUserProgress = InferInsertModel<typeof userProgress>;
+
+export const chatContexts = pgTable("chat_contexts", {
+  chatId: uuid("chat_id")
+    .primaryKey()
+    .notNull()
+    .references(() => chat.id, { onDelete: "cascade" }),
+  sources: jsonb("sources")
+    .notNull()
+    .$type<
+      Array<{
+        documentId: string;
+        title: string;
+        summary: string;
+        mainTopics?: Array<{
+          topic: string;
+          description?: string;
+          pages?: number[];
+          subtopics?: Array<{
+            subtopic: string;
+            description?: string;
+            pages?: number[];
+          }>;
+        }>;
+      }>
+    >()
+    .default([]),
+  globalSummary: text("global_summary").notNull().default(""),
+  globalTopics: jsonb("global_topics")
+    .notNull()
+    .$type<
+      Array<{
+        topic: string;
+        description?: string;
+        pages?: number[];
+        subtopics?: Array<{
+          subtopic: string;
+          description?: string;
+          pages?: number[];
+        }>;
+      }>
+    >()
+    .default([]),
+  // New fields for intelligent merging (Step 1)
+  relationships: jsonb("relationships")
+    .$type<
+      Array<{
+        sourceId1: string;
+        sourceId2: string;
+        type: "complementary" | "expands" | "contradictory" | "repeats";
+        description: string;
+        confidence: number;
+        topics: string[];
+      }>
+    >()
+    .default([]),
+  sourceCount: integer("source_count").default(0),
+  lastSummaryRegeneration: timestamp("last_summary_regeneration", {
+    withTimezone: true,
+  }),
+  deltaSummaries: jsonb("delta_summaries")
+    .$type<
+      Array<{
+        sourceId: string;
+        sourceTitle: string;
+        delta: string;
+        addedAt: string;
+      }>
+    >()
+    .default([]),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export type ChatContext = InferSelectModel<typeof chatContexts>;
+export type NewChatContext = InferInsertModel<typeof chatContexts>;
+
+// Topic embeddings table for vector similarity search
+export const topicEmbeddings = pgTable(
+  "topic_embeddings",
+  {
+    id: uuid("id").defaultRandom().primaryKey().notNull(),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => chat.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    topicId: varchar("topic_id", { length: 255 }).notNull(),
+    topicTitle: text("topic_title").notNull(),
+    topicDescription: text("topic_description"),
+    embedding: vector("embedding", { dimensions: 1536 }),
+    topicData: jsonb("topic_data").notNull().$type<{
+      topic: string;
+      description?: string;
+      pages?: number[];
+      subtopics?: Array<{
+        subtopic: string;
+        description?: string;
+        pages?: number[];
+      }>;
+    }>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    uniqChatTopic: uniqueIndex("uniq_chat_topic").on(
+      table.chatId,
+      table.topicId
+    ),
+  })
+);
+
+export type TopicEmbedding = InferSelectModel<typeof topicEmbeddings>;
+export type NewTopicEmbedding = InferInsertModel<typeof topicEmbeddings>;
+
+// BlockNote blocks table for persistent notebook editing
+export const notebookBlocks = pgTable("notebook_blocks", {
+  id: uuid("id").defaultRandom().primaryKey().notNull(),
+  chatId: uuid("chat_id")
+    .notNull()
+    .references(() => chat.id, { onDelete: "cascade" }),
+  blockType: varchar("block_type", { length: 50 }).notNull(), // questionAnswer, topicExplanation, summary, note, etc.
+  blockOrder: integer("block_order").notNull().default(0), // Order within the chat
+  blockData: jsonb("block_data").notNull().$type<{
+    // BlockNote block structure
+    type: string;
+    props?: Record<string, unknown>;
+    content?: unknown;
+  }>(),
+  metadata: jsonb("metadata").$type<{
+    // Additional metadata for block actions
+    pinned?: boolean;
+    tags?: string[];
+    linkedBlockIds?: string[];
+    collapsed?: boolean;
+    parentBlockId?: string | null; // For hierarchical structures (topics/subtopics)
+    topicId?: string;
+    subtopicId?: string;
+    documentIds?: string[];
+  }>(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+}, (table) => ({
+  // Indexes for performance (chats can have many blocks)
+  chatIdIdx: index("notebook_blocks_chat_id_idx").on(table.chatId),
+  blockOrderIdx: index("notebook_blocks_block_order_idx").on(table.chatId, table.blockOrder),
+}));
+
+export type NotebookBlock = InferSelectModel<typeof notebookBlocks>;
+export type NewNotebookBlock = InferInsertModel<typeof notebookBlocks>;
+
 // Tutor Session schema for guided learning
 export const tutorSession = pgTable("tutor_sessions", {
   id: uuid("id").defaultRandom().primaryKey().notNull(),
@@ -402,3 +645,43 @@ export type ChatQuizQuestion = {
   sourcePage: number;
   difficulty: "easy" | "medium" | "hard";
 };
+
+// Saved blocks table for user-curated notebook content
+export const savedBlocks = pgTable(
+  "saved_blocks",
+  {
+    id: uuid("id").defaultRandom().primaryKey().notNull(),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => chat.id, { onDelete: "cascade" }),
+    blockType: varchar("block_type", { length: 50 }).notNull(), // 'explanation' | 'qa' | 'summary' | 'definition' | 'note'
+    content: text("content").notNull(), // The saved content (text)
+    question: text("question"), // For Q&A blocks: the question
+    answer: text("answer"), // For Q&A blocks: the answer
+    topicName: text("topic_name"), // Optional: topic this block belongs to
+    subtopicName: text("subtopic_name"), // Optional: subtopic this block belongs to
+    sourceMessageId: uuid("source_message_id").references(() => message.id, {
+      onDelete: "set null",
+    }), // Reference to original message
+    documentIds: jsonb("document_ids").$type<string[]>().default([]), // Source document IDs
+    metadata: jsonb("metadata").$type<{
+      pageNumbers?: number[];
+      confidence?: number;
+      tags?: string[];
+    }>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    chatIdIdx: index("saved_blocks_chat_id_idx").on(table.chatId),
+    topicIdx: index("saved_blocks_topic_idx").on(table.chatId, table.topicName),
+    messageIdIdx: index("saved_blocks_message_id_idx").on(table.sourceMessageId),
+  })
+);
+
+export type SavedBlock = InferSelectModel<typeof savedBlocks>;
+export type NewSavedBlock = InferInsertModel<typeof savedBlocks>;

@@ -26,8 +26,10 @@ import {
   answers,
   attempts,
   type Chat,
+  type ChatContext,
   type ChatQuiz,
   chat,
+  chatContexts,
   chatQuizzes,
   type DBMessage,
   type DocumentChunk,
@@ -36,6 +38,15 @@ import {
   document,
   documentSummaries,
   documents,
+  type Course,
+  type NewCourse,
+  courses,
+  type NewUnit,
+  type Unit,
+  units,
+  type NewUnitSlide,
+  type UnitSlide,
+  unitSlides,
   type Flashcard,
   flashcards,
   type IngestedDocument,
@@ -46,17 +57,26 @@ import {
   type NewAttempt,
   type NewDocument,
   type NewDocumentChunk,
+  type NewNotebookBlock,
   type NewQuestion,
   type NewQuiz,
+  type NotebookBlock,
+  notebookBlocks,
   type Question,
   type Quiz,
   questions,
   quizzes,
+  savedBlocks,
+  type SavedBlock,
+  type NewSavedBlock,
   type Suggestion,
   stream,
   suggestion,
   type User,
   user,
+  type NewUserProgress,
+  type UserProgress,
+  userProgress,
   vote,
 } from "./schema";
 import { generateHashedPassword } from "./utils";
@@ -67,7 +87,7 @@ import { generateHashedPassword } from "./utils";
 
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
-const db = drizzle(client);
+export const db = drizzle(client);
 
 export async function getUser(email: string): Promise<User[]> {
   try {
@@ -528,6 +548,26 @@ export async function updateChatLastContextById({
   } catch (error) {
     console.warn("Failed to update lastContext for chat", chatId, error);
     return;
+  }
+}
+
+export async function updateChatDifficultyLevelById({
+  chatId,
+  difficultyLevel,
+}: {
+  chatId: string;
+  difficultyLevel: "age12" | "age15" | "university";
+}) {
+  try {
+    return await db
+      .update(chat)
+      .set({ difficultyLevel })
+      .where(eq(chat.id, chatId));
+  } catch (_error) {
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update chat difficulty level by id"
+    );
   }
 }
 
@@ -1178,5 +1218,428 @@ export async function getDocumentChunks({
     console.warn("Database not configured, returning empty chunks:", error);
     // Return empty array instead of mock data to avoid confusion
     return [];
+  }
+}
+
+export async function getChatContext({
+  chatId,
+}: {
+  chatId: string;
+}): Promise<ChatContext | null> {
+  try {
+    const [context] = await db
+      .select()
+      .from(chatContexts)
+      .where(eq(chatContexts.chatId, chatId))
+      .limit(1)
+      .execute();
+
+    return context ?? null;
+  } catch (error) {
+    // Gracefully handle missing table (migration not run yet)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        error.message.includes("table"))
+    ) {
+      console.warn(
+        "⚠️ chat_contexts table does not exist yet. Run migrations to enable context features.",
+        error
+      );
+      return null;
+    }
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to fetch chat context"
+    );
+  }
+}
+
+// Export ChatContextSource type for use in other modules
+export type ChatContextSource = ChatContext["sources"][number];
+
+// Export relationship and delta summary types
+export type Relationship = NonNullable<ChatContext["relationships"]>[number];
+export type DeltaSummary = NonNullable<ChatContext["deltaSummaries"]>[number];
+
+export async function upsertChatContext({
+  chatId,
+  sources,
+  globalSummary,
+  globalTopics,
+  relationships,
+  sourceCount,
+  lastSummaryRegeneration,
+  deltaSummaries,
+}: {
+  chatId: string;
+  sources: ChatContext["sources"];
+  globalSummary: string;
+  globalTopics: ChatContext["globalTopics"];
+  relationships?: ChatContext["relationships"];
+  sourceCount?: number;
+  lastSummaryRegeneration?: Date | null;
+  deltaSummaries?: ChatContext["deltaSummaries"];
+}) {
+  try {
+    // Calculate source count from sources array if not provided
+    const calculatedSourceCount = sourceCount ?? sources.length;
+    
+    await db
+      .insert(chatContexts)
+      .values({
+        chatId,
+        sources,
+        globalSummary,
+        globalTopics,
+        relationships: relationships ?? [],
+        sourceCount: calculatedSourceCount,
+        lastSummaryRegeneration: lastSummaryRegeneration ?? null,
+        deltaSummaries: deltaSummaries ?? [],
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: chatContexts.chatId,
+        set: {
+          sources,
+          globalSummary,
+          globalTopics,
+          relationships: relationships ?? undefined,
+          sourceCount: calculatedSourceCount,
+          lastSummaryRegeneration: lastSummaryRegeneration ?? undefined,
+          deltaSummaries: deltaSummaries ?? undefined,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (error) {
+    // Gracefully handle missing table or missing columns (migration not run yet)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        error.message.includes("table") ||
+        error.message.includes("column") ||
+        error.message.includes("undefined"))
+    ) {
+      console.warn(
+        "⚠️ chat_contexts table or columns may not exist yet. Run migrations to enable context features.",
+        error
+      );
+      // Fallback: Try without new fields for backward compatibility
+      try {
+        await db
+          .insert(chatContexts)
+          .values({
+            chatId,
+            sources,
+            globalSummary,
+            globalTopics,
+            updatedAt: new Date(),
+          } as any)
+          .onConflictDoUpdate({
+            target: chatContexts.chatId,
+            set: {
+              sources,
+              globalSummary,
+              globalTopics,
+              updatedAt: new Date(),
+            } as any,
+          });
+      } catch (fallbackError) {
+        console.warn(
+          "⚠️ Fallback update also failed. Context features may not be available.",
+          fallbackError
+        );
+        // Silently return instead of throwing to allow app to continue
+        return;
+      }
+      return;
+    }
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update chat context"
+    );
+  }
+}
+
+export async function ensureTopicEmbeddingsVectorIndex({
+  lists = 100,
+}: {
+  lists?: number;
+} = {}): Promise<void> {
+  try {
+    const inlineLists =
+      Number.isFinite(lists) && lists > 0 ? Math.floor(lists) : 100;
+    await db.execute(
+      sql.raw(
+        `CREATE INDEX IF NOT EXISTS topic_embeddings_embedding_idx ON topic_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = ${inlineLists});`
+      )
+    );
+  } catch (error) {
+    console.warn("Failed to ensure topic_embeddings embedding index", error);
+  }
+}
+
+// Notebook Blocks Queries
+export async function saveNotebookBlocks({
+  blocks,
+  chatId,
+}: {
+  blocks: NewNotebookBlock[];
+  chatId: string;
+}): Promise<NotebookBlock[]> {
+  try {
+    // Delete existing blocks for this chat
+    await db.delete(notebookBlocks).where(eq(notebookBlocks.chatId, chatId));
+
+    // Insert new blocks
+    const insertedBlocks = await db
+      .insert(notebookBlocks)
+      .values(blocks)
+      .returning();
+
+    return insertedBlocks;
+  } catch (error) {
+    console.error("Failed to save notebook blocks:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to save notebook blocks"
+    );
+  }
+}
+
+export async function getNotebookBlocksByChatId({
+  chatId,
+}: {
+  chatId: string;
+}): Promise<NotebookBlock[]> {
+  try {
+    const blocks = await db
+      .select()
+      .from(notebookBlocks)
+      .where(eq(notebookBlocks.chatId, chatId))
+      .orderBy(asc(notebookBlocks.blockOrder));
+
+    return blocks;
+  } catch (error) {
+    console.error("Failed to get notebook blocks:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to get notebook blocks"
+    );
+  }
+}
+
+export async function updateNotebookBlock({
+  blockId,
+  updates,
+}: {
+  blockId: string;
+  updates: Partial<NewNotebookBlock>;
+}): Promise<NotebookBlock> {
+  try {
+    const updated = await db
+      .update(notebookBlocks)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(notebookBlocks.id, blockId))
+      .returning();
+
+    if (updated.length === 0) {
+      throw new ChatSDKError("not_found:database", "Block not found");
+    }
+
+    return updated[0];
+  } catch (error) {
+    console.error("Failed to update notebook block:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to update notebook block"
+    );
+  }
+}
+
+export async function getNotebookBlockById({
+  blockId,
+}: {
+  blockId: string;
+}): Promise<NotebookBlock | null> {
+  try {
+    const blocks = await db
+      .select()
+      .from(notebookBlocks)
+      .where(eq(notebookBlocks.id, blockId))
+      .limit(1);
+
+    return blocks[0] || null;
+  } catch (error) {
+    console.error("Failed to get notebook block:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to get notebook block"
+    );
+  }
+}
+
+export async function deleteNotebookBlock({
+  blockId,
+}: {
+  blockId: string;
+}): Promise<void> {
+  try {
+    await db.delete(notebookBlocks).where(eq(notebookBlocks.id, blockId));
+  } catch (error) {
+    console.error("Failed to delete notebook block:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to delete notebook block"
+    );
+  }
+}
+
+// Saved blocks queries for user-curated notebook content
+export async function saveBlockToNotebook(
+  block: NewSavedBlock
+): Promise<SavedBlock> {
+  try {
+    const inserted = await db.insert(savedBlocks).values(block).returning();
+    return inserted[0];
+  } catch (error) {
+    // Gracefully handle case where table doesn't exist yet (migration not run)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        (error as any).code === "42P01")
+    ) {
+      console.warn(
+        "⚠️ saved_blocks table does not exist yet. Run migration 0015_add_saved_blocks.sql"
+      );
+      throw new ChatSDKError(
+        "bad_request:database",
+        "saved_blocks table does not exist. Please run migration 0015_add_saved_blocks.sql"
+      );
+    }
+    console.error("Failed to save block to notebook:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to save block to notebook"
+    );
+  }
+}
+
+export async function getSavedBlocksByChatId(
+  chatId: string
+): Promise<SavedBlock[]> {
+  try {
+    return await db
+      .select()
+      .from(savedBlocks)
+      .where(eq(savedBlocks.chatId, chatId))
+      .orderBy(asc(savedBlocks.createdAt));
+  } catch (error) {
+    // Gracefully handle case where table doesn't exist yet (migration not run)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        (error as any).code === "42P01")
+    ) {
+      console.warn(
+        "⚠️ saved_blocks table does not exist yet. Run migration 0015_add_saved_blocks.sql"
+      );
+      return [];
+    }
+    console.error("Failed to get saved blocks:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to get saved blocks"
+    );
+  }
+}
+
+export async function getSavedBlockByMessageId(
+  messageId: string
+): Promise<SavedBlock | null> {
+  try {
+    const blocks = await db
+      .select()
+      .from(savedBlocks)
+      .where(eq(savedBlocks.sourceMessageId, messageId))
+      .limit(1);
+    return blocks[0] || null;
+  } catch (error) {
+    // Gracefully handle case where table doesn't exist yet (migration not run)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        (error as any).code === "42P01")
+    ) {
+      console.warn(
+        "⚠️ saved_blocks table does not exist yet. Run migration 0015_add_saved_blocks.sql"
+      );
+      return null;
+    }
+    console.error("Failed to get saved block by message ID:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to get saved block by message ID"
+    );
+  }
+}
+
+export async function deleteSavedBlock(blockId: string): Promise<void> {
+  try {
+    await db.delete(savedBlocks).where(eq(savedBlocks.id, blockId));
+  } catch (error) {
+    // Gracefully handle case where table doesn't exist yet (migration not run)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        (error as any).code === "42P01")
+    ) {
+      console.warn(
+        "⚠️ saved_blocks table does not exist yet. Run migration 0015_add_saved_blocks.sql"
+      );
+      return; // Silently return if table doesn't exist
+    }
+    console.error("Failed to delete saved block:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to delete saved block"
+    );
+  }
+}
+
+export async function deleteSavedBlockByMessageId(
+  messageId: string
+): Promise<void> {
+  try {
+    await db
+      .delete(savedBlocks)
+      .where(eq(savedBlocks.sourceMessageId, messageId));
+  } catch (error) {
+    // Gracefully handle case where table doesn't exist yet (migration not run)
+    if (
+      error instanceof Error &&
+      (error.message.includes("does not exist") ||
+        error.message.includes("relation") ||
+        (error as any).code === "42P01")
+    ) {
+      console.warn(
+        "⚠️ saved_blocks table does not exist yet. Run migration 0015_add_saved_blocks.sql"
+      );
+      return; // Silently return if table doesn't exist
+    }
+    console.error("Failed to delete saved block by message ID:", error);
+    throw new ChatSDKError(
+      "bad_request:database",
+      "Failed to delete saved block by message ID"
+    );
   }
 }

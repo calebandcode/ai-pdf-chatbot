@@ -7,17 +7,17 @@ import {
   ContextualChatModal,
   type SelectionContext,
 } from "@/components/contextual-chat-modal";
-import { DiscoveryPanel } from "@/components/discovery-panel";
 import { MagnifyingGlass } from "@/components/magnifying-glass";
 import { NoteManager } from "@/components/note-manager";
 import { QuizFromTextModal } from "@/components/quiz-from-text-modal";
-import { ReadingControlsBar } from "@/components/reading-controls-bar";
+// ReadingControlsBar removed - mode toggle now in HybridNotebookView
 import { TextSelectionBubble } from "@/components/text-selection-bubble";
 import { TipsCollection } from "@/components/tips-collection";
 import { TopicOutline } from "@/components/topic-outline";
 import { useFont } from "@/contexts/font-context";
 import { useTips } from "@/hooks/use-tips";
 import type { DiscoveryResponse } from "@/lib/discovery/types";
+import type { ChatContext } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 
 type PDFUploadMessageData = {
@@ -51,13 +51,8 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     documentId,
     chatId,
   } = data;
-  // Text selection features
-  const [showTipsCollection, setShowTipsCollection] = useState(false);
-  const [showQuizModal, setShowQuizModal] = useState(false);
-  const [showContextualChat, setShowContextualChat] = useState(false);
-  const [selectedText, setSelectedText] = useState("");
-  const [quizSource, setQuizSource] = useState<string | undefined>();
-  const [chatContext, setChatContext] = useState<SelectionContext | null>(null);
+  const [mergedChatContext, setMergedChatContext] = useState<ChatContext | null>(null);
+  const [isFirstSource, setIsFirstSource] = useState<boolean | null>(null);
   const [discoveryState, setDiscoveryState] = useState<{
     status: "idle" | "loading" | "success" | "error";
     data: DiscoveryResponse | null;
@@ -66,29 +61,72 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
     data: null,
   });
   const hasFetchedDiscoveryRef = useRef(false);
+  const hasFetchedContextRef = useRef(false);
 
-  const { tips, deleteTip } = useTips();
   const { fontFamily, fontSize } = useFont();
 
-  // Text selection handlers
-  const handleHighlight = () => {
-    // The highlighting is already handled in the TextSelectionBubble component
-  };
+  // Fetch merged chat context to determine if we should show merged summary/topics
+  const fetchChatContext = useCallback(async () => {
+    if (!chatId) {
+      return;
+    }
 
-  const handleQuizMe = (text: string) => {
-    setSelectedText(text);
-    setQuizSource(documentTitle);
-    setShowQuizModal(true);
-  };
+    try {
+      const response = await fetch(`/api/chat/${chatId}/context`);
+      if (response.ok) {
+        const payload = await response.json();
+        const contextData = payload.context as ChatContext | null;
+        setMergedChatContext(contextData);
+        
+        // Determine if we should show merged content:
+        // - If context has multiple sources, show merged content only for the FIRST source
+        // - Otherwise, show individual content
+        if (contextData && contextData.sources && contextData.sources.length > 1) {
+          // Check if this documentId is the first source in the array
+          const firstSourceId = contextData.sources[0]?.documentId;
+          setIsFirstSource(firstSourceId === documentId);
+        } else {
+          // Single source or no context - this is the first/only source
+          setIsFirstSource(true);
+        }
+      } else {
+        // No context yet - assume this is the first source
+        setIsFirstSource(true);
+      }
+    } catch (error) {
+      console.warn("Failed to fetch chat context:", error);
+      // If context fetch fails, assume this is the first source
+      setIsFirstSource(true);
+    }
+  }, [chatId, documentId]);
 
-  const handleQuizFromTip = (text: string) => {
-    setSelectedText(text);
-    setQuizSource("Saved Tip");
-    setShowQuizModal(true);
-  };
+  // Refresh context when messages are updated (e.g., after adding a source)
+  useEffect(() => {
+    const handleRefresh = () => {
+      hasFetchedContextRef.current = false;
+      fetchChatContext();
+    };
+    
+    window.addEventListener("refresh-messages", handleRefresh);
+    return () => {
+      window.removeEventListener("refresh-messages", handleRefresh);
+    };
+  }, [fetchChatContext]);
+
+  useEffect(() => {
+    fetchChatContext();
+  }, [fetchChatContext]);
+
 
   const fetchDiscoveries = useCallback(async () => {
-      if (!documentId) {
+      // Only fetch discoveries for the first source
+      // Wait for context to be loaded (isFirstSource !== null) before deciding
+      if (!documentId || isFirstSource === false) {
+        return;
+      }
+
+      // If context is still loading, wait
+      if (isFirstSource === null && mergedChatContext === null) {
         return;
       }
 
@@ -101,6 +139,9 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         data: prev.data,
       }));
 
+      // Option B: Use first source's individual topics (no merging)
+      const topicsToUse = mainTopics;
+
       try {
         const response = await fetch("/api/discovery", {
           method: "POST",
@@ -110,8 +151,8 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
           body: JSON.stringify({
             documentId,
             documentTitle,
-            summary,
-            topics: (mainTopics || []).map((topic) => ({
+            summary: summary,  // Option B: Use first source's individual summary
+            topics: (topicsToUse || []).map((topic) => ({
               topic: topic.topic,
               description: topic.description,
             })),
@@ -130,27 +171,40 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
         setDiscoveryState({ status: "error", data: null });
       }
     },
-    [documentId, documentTitle, mainTopics, summary]
+    [documentId, documentTitle, isFirstSource, mergedChatContext, summary, mainTopics]
   );
 
   useEffect(() => {
     hasFetchedDiscoveryRef.current = false;
     setDiscoveryState({ status: "idle", data: null });
-  }, [documentId]);
+  }, [documentId, isFirstSource]);
 
   useEffect(() => {
     fetchDiscoveries();
   }, [fetchDiscoveries]);
 
-  const handleAskAboutThis = (_text: string, context: SelectionContext) => {
-    setChatContext(context);
-    setShowContextualChat(true);
-  };
+  // Option B: Only show first source's content, additional sources are hidden but used for context
+  // - If this is the first source: show its individual summary/topics
+  // - If this is NOT the first source: show only document card (no summary/topics)
+  // - While loading (isFirstSource === null), assume this is the first source to show content immediately
+  const shouldShowFullContent = isFirstSource !== false; // Show content unless we know for sure it's not the first source
+  
+  // Use first source's individual content (Option B: no merging)
+  const displaySummary = shouldShowFullContent ? summary : null;
+  const displayTopics = shouldShowFullContent ? mainTopics : null;
+  
+  // For Q&A and explanations, use ALL sources (including additional ones)
+  const allDocumentIds = mergedChatContext?.sources
+    ? mergedChatContext.sources.map(s => s.documentId)
+    : (shouldShowFullContent ? [documentId] : []);
 
   console.log("🎨 Rendering PDF Upload Message:", {
     documentTitle,
     pageCount,
-    summaryLength: summary.length,
+    isFirstSource,
+    shouldShowFullContent,
+    hasMergedContext: !!mergedChatContext,
+    sourceCount: mergedChatContext?.sources?.length ?? 0,
     documentId,
     chatId,
   });
@@ -187,99 +241,46 @@ export function PDFUploadMessage({ data, className }: PDFUploadMessageProps) {
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-base">{documentTitle}</h3>
             <span className="rounded-full bg-muted px-2 py-1 text-muted-foreground text-xs">
-              {pageCount} pages
+              {pageCount} {pageCount === 1 ? 'page' : 'pages'}
             </span>
           </div>
-          <div className="flex items-center gap-1 text-muted-foreground text-sm">
-            <Sparkles className="h-3 w-3" />
-            <span>AI Tutor Analysis Complete</span>
-          </div>
+          {shouldShowFullContent && (
+            <div className="flex items-center gap-1 text-muted-foreground text-sm">
+              <Sparkles className="h-3 w-3" />
+              <span>AI Tutor Analysis Complete</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Summary section - pure conversational text with subtle background */}
-      <div className="rounded-lg bg-gray-50/30 p-4">
-        <p className="text-sm leading-relaxed">{summary}</p>
-      </div>
+      {/* Summary section - only show for first source */}
+      {displaySummary && (
+        <div className="rounded-lg bg-gray-50/30 p-4">
+          <p className="text-sm leading-relaxed">{displaySummary}</p>
+        </div>
+      )}
 
-      {/* Topic Outline */}
-      {mainTopics && mainTopics.length > 0 && (
+      {/* Topic Outline - only show for first source */}
+      {displayTopics && displayTopics.length > 0 && (
         <div className="mt-4">
           <TopicOutline
             chatId={chatId}
-            documentIds={[documentId]}
-            topics={mainTopics}
+            documentIds={allDocumentIds}
+            topics={displayTopics}
           />
         </div>
       )}
 
-      {/* Inline discovery for small screens */}
-      <div className="lg:hidden">
-        <DiscoveryPanel
-          data={discoveryState.data}
-          isError={discoveryState.status === "error"}
-          isLoading={discoveryState.status === "loading"}
-        />
-      </div>
+      {/* Reading Controls Bar - Removed (mode toggle moved to HybridNotebookView) */}
+      {shouldShowFullContent && (
+        <>
+          {/* Magnifying Glass */}
+          <MagnifyingGlass />
+        </>
+      )}
 
-      {/* Reading Controls Bar */}
-      <ReadingControlsBar
-        onTipsClick={() => setShowTipsCollection(true)}
-        tipsCount={tips.length}
-      />
+      {/* Discovery panel hidden in game-focused pivot */}
 
-      {/* Magnifying Glass */}
-      <MagnifyingGlass />
-
-      {/* Note Manager - wraps components that need note functionality */}
-      <NoteManager source={documentTitle}>
-        {(requestNote) => (
-          <TextSelectionBubble
-            onAddNote={(text, range, position) => {
-              requestNote(text, range, position);
-            }}
-            onAskAboutThis={handleAskAboutThis}
-            onHighlight={handleHighlight}
-            onQuizMe={handleQuizMe}
-            source={documentTitle}
-          />
-        )}
-      </NoteManager>
-
-      {/* Floating discovery panel for large screens */}
-      <div className="pointer-events-none fixed right-4 bottom-24 z-30 hidden lg:block">
-        <div className="pointer-events-auto w-80">
-          <DiscoveryPanel
-            data={discoveryState.data}
-            isError={discoveryState.status === "error"}
-            isLoading={discoveryState.status === "loading"}
-          />
-        </div>
-      </div>
-
-      {/* Tips Collection Modal */}
-      <TipsCollection
-        isOpen={showTipsCollection}
-        onClose={() => setShowTipsCollection(false)}
-        onDeleteTip={deleteTip}
-        onQuizFromTip={handleQuizFromTip}
-        tips={tips}
-      />
-
-      {/* Quiz from Text Modal */}
-      <QuizFromTextModal
-        isOpen={showQuizModal}
-        onClose={() => setShowQuizModal(false)}
-        selectedText={selectedText}
-        source={quizSource}
-      />
-
-      {/* Contextual Chat Modal */}
-      <ContextualChatModal
-        context={chatContext}
-        isOpen={showContextualChat}
-        onClose={() => setShowContextualChat(false)}
-      />
     </motion.div>
   );
 }

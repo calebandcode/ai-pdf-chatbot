@@ -6,15 +6,18 @@ import { generateDocumentSummary } from "@/lib/ai/pdf-tutor";
 import {
   createDocumentRecord,
   createDocumentSummary,
+  getChatContext,
   getDocumentChunks,
   saveChat,
   saveDocumentChunks,
   saveMessages,
+  upsertChatContext,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 import { chunkPages } from "@/lib/ingest/chunk";
 import { embedChunks } from "@/lib/ingest/embed";
 import { generateUUID } from "@/lib/utils";
+import { mergeSourceIntoContext } from "@/lib/ai/context-merge";
 import { processContent } from "./process-content";
 
 export type ContentType = "text" | "link" | "youtube";
@@ -168,6 +171,33 @@ export async function processAndCreateNotebook(
 
     console.log("📝 Created chat:", chatId, "with title:", chatTitle);
 
+    // Integrate with chat context system (like PDF processing)
+    const sourceEntry = {
+      documentId: documentRecord.id,
+      title: documentRecord.title,
+      summary: summaryResult.summary,
+      mainTopics: summaryResult.mainTopics,
+    };
+
+    // Integrate with chat context system (gracefully handles missing table)
+    const existingContext = await getChatContext({ chatId });
+    const mergedContext = await mergeSourceIntoContext({
+      existingSummary: existingContext?.globalSummary,
+      existingTopics: existingContext?.globalTopics,
+      existingSources: existingContext?.sources,
+      source: sourceEntry,
+      chatId,
+      useSemanticMerging: true,
+    });
+
+    // Attempt to save context (will gracefully fail if table doesn't exist)
+    await upsertChatContext({
+      chatId,
+      sources: mergedContext.sources,
+      globalSummary: mergedContext.globalSummary,
+      globalTopics: mergedContext.globalTopics,
+    });
+
     // Create initial AI message (like PDF processing)
     console.log("🤖 Creating initial AI message:", {
       id: chatId,
@@ -215,10 +245,8 @@ export async function processAndCreateNotebook(
         documentId: documentRecord.id,
         chatId,
         title: processedContent.title,
-        summary:
-          processedContent.metadata?.summary ||
-          "Content processed successfully",
-        suggestedActions: [
+        summary: summaryResult.summary,
+        suggestedActions: summaryResult.suggestedActions || [
           "Ask me about any topic",
           "Take a quiz on this content",
           "Explore related concepts",

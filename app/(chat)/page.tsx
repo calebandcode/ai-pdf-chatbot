@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { DataStreamHandler } from "@/components/data-stream-handler";
 import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
-import { getDocumentSummary, getMessagesByChatId } from "@/lib/db/queries";
+import { getDocumentSummary, getMessagesByChatId, getChatContext } from "@/lib/db/queries";
 import { generateUUID } from "@/lib/utils";
 import { auth } from "../(auth)/auth";
 
@@ -116,6 +116,9 @@ export default async function Page({
         }
       }
 
+      const initialContext = await getChatContext({ chatId: id }).catch(
+        () => null
+      );
       const cookieStore = await cookies();
       const modelIdFromCookie = cookieStore.get("chat-model");
 
@@ -127,6 +130,7 @@ export default async function Page({
             id={id}
             initialChatModel={modelIdFromCookie?.value || DEFAULT_CHAT_MODEL}
             initialMessages={initialMessages}
+            initialContext={initialContext}
             initialVisibilityType="private"
             isReadonly={false}
             key={id}
@@ -141,6 +145,9 @@ export default async function Page({
   }
 
   // Regular chat interface
+  const initialContext = await getChatContext({ chatId: id }).catch(
+    () => null
+  );
   const cookieStore = await cookies();
   const modelIdFromCookie = cookieStore.get("chat-model");
 
@@ -149,9 +156,10 @@ export default async function Page({
       <>
         <Chat
           autoResume={false}
-          id={id}
-          initialChatModel={DEFAULT_CHAT_MODEL}
-          initialMessages={[]}
+        id={id}
+        initialChatModel={DEFAULT_CHAT_MODEL}
+        initialMessages={[]}
+        initialContext={initialContext}
           initialVisibilityType="private"
           isReadonly={false}
           key={id}
@@ -168,6 +176,7 @@ export default async function Page({
         id={id}
         initialChatModel={modelIdFromCookie.value}
         initialMessages={[]}
+        initialContext={initialContext}
         initialVisibilityType="private"
         isReadonly={false}
         key={id}

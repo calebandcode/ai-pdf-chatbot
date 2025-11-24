@@ -90,11 +90,11 @@ function NotebookCard({
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className="group relative cursor-pointer rounded-sm border border-gray-100 bg-white p-4 transition-all duration-200 hover:border-gray-200"
+      className="group relative cursor-pointer rounded-sm border-2 border-gray-100 border-b-[4px] bg-white p-4 transition-all duration-200 active:border-b-2"
       initial={{ opacity: 0, y: 20 }}
       onClick={handleClick}
       transition={{ duration: 0.2 }}
-      whileHover={{ y: -1, boxShadow: "0 4px 8px rgba(0,0,0,0.06)" }}
+      // whileHover={{ y: -1, boxShadow: "0 4px 8px rgba(0,0,0,0.06)" }}
     >
       {/* Header */}
       <div className="mb-14 flex items-start justify-between">
@@ -194,13 +194,13 @@ function NotebookCard({
         <span className="text-gray-300 text-xs">
           {formatLastActivity(chat.createdAt)}
         </span>
-        <div className="font-normal text-gray-400 text-xs group-hover:text-gray-500">
+        {/* <div className="font-normal text-gray-400 text-xs group-hover:text-gray-500">
           Continue →
-        </div>
+        </div> */}
       </div>
 
       {/* Hover Effect */}
-      <div className="pointer-events-none absolute inset-0 rounded-sm bg-gradient-to-r from-gray-50/0 to-gray-50/0 transition-all duration-200 group-hover:from-gray-50/20 group-hover:to-gray-50/5" />
+      {/* <div className="pointer-events-none absolute inset-0 rounded-sm bg-gradient-to-r from-gray-50/0 to-gray-50/0 transition-all duration-200 group-hover:from-gray-50/20 group-hover:to-gray-50/5" /> */}
     </motion.div>
   );
 }

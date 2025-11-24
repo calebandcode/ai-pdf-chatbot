@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { put } from "@vercel/blob";
 import { auth } from "@/app/(auth)/auth";
@@ -7,10 +7,13 @@ import { generateDocumentSummary } from "@/lib/ai/pdf-tutor";
 import {
   createDocumentRecord,
   createDocumentSummary,
+  getChatById,
+  getChatContext,
   getDocumentChunks,
   saveChat,
   saveDocumentChunks,
   saveMessages,
+  upsertChatContext,
 } from "@/lib/db/queries";
 import { ChatSDKError } from "@/lib/errors";
 import { chunkPages } from "@/lib/ingest/chunk";
@@ -18,6 +21,7 @@ import { embedChunks } from "@/lib/ingest/embed";
 import { extractPdfPages } from "@/lib/ingest/pdf";
 import { ensureVectorIndex } from "@/lib/ingest/vector";
 import { generateUUID } from "@/lib/utils";
+import { mergeSourceIntoContext } from "@/lib/ai/context-merge";
 
 type UploadResult = {
   documentId: string;
@@ -27,6 +31,11 @@ type UploadResult = {
   summary?: string;
   suggestedActions?: string[];
   pageCount?: number;
+  chatId?: string;
+  deltaMessage?: string;
+};
+
+type UploadAndIngestOptions = {
   chatId?: string;
 };
 
@@ -53,7 +62,10 @@ function formatDurationMs(durationMs: number): string {
   return `${minutes}m ${remSeconds}s`;
 }
 
-export async function uploadAndIngest(formData: FormData) {
+export async function uploadAndIngest(
+  formData: FormData,
+  options?: UploadAndIngestOptions
+) {
   const session = await auth();
 
   if (!session?.user?.id) {
@@ -75,10 +87,19 @@ export async function uploadAndIngest(formData: FormData) {
   }
 
   const results: UploadResult[] = [];
+  if (options?.chatId) {
+    const chatRecord = await getChatById({ id: options.chatId });
+    if (!chatRecord || chatRecord.userId !== session.user.id) {
+      throw new ChatSDKError(
+        "forbidden:chat",
+        "You do not have access to this chat"
+      );
+    }
+  }
 
   for (const file of files) {
     const startedAtMs = Date.now();
-    console.log("📄 Starting processing for file:", file.name);
+    console.log("ðŸ“„ Starting processing for file:", file.name);
 
     if (file.type !== "application/pdf") {
       throw new ChatSDKError(
@@ -89,7 +110,7 @@ export async function uploadAndIngest(formData: FormData) {
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    console.log("📄 File buffer created, size:", buffer.length);
+    console.log("ðŸ“„ File buffer created, size:", buffer.length);
 
     // For development, we'll skip blob storage and use a placeholder URL
     // In production, you'll need to configure Vercel Blob storage
@@ -114,36 +135,36 @@ export async function uploadAndIngest(formData: FormData) {
     const title = sanitizeTitle(file.name);
 
     try {
-      console.log("📄 Creating document record for:", title);
+      console.log("ðŸ“„ Creating document record for:", title);
       const documentRecord = await createDocumentRecord({
         userId: session.user.id,
         title,
         blobUrl,
       });
-      console.log("📄 Document record created:", documentRecord.id);
+      console.log("ðŸ“„ Document record created:", documentRecord.id);
 
-      console.log("📄 Starting PDF processing for:", title);
+      console.log("ðŸ“„ Starting PDF processing for:", title);
       console.time("extractPdfPages");
       const pages = await extractPdfPages(buffer);
       console.timeEnd("extractPdfPages");
-      console.log("📄 Extracted pages:", pages.length, "pages");
+      console.log("ðŸ“„ Extracted pages:", pages.length, "pages");
 
       // Log first page content to verify PDF parsing is working
       if (pages.length > 0) {
         console.log(
-          `📄 First page content preview: ${pages[0].text.slice(0, 200)}...`
+          `ðŸ“„ First page content preview: ${pages[0].text.slice(0, 200)}...`
         );
       }
 
       console.time("chunkPages");
       const chunks = chunkPages(pages);
       console.timeEnd("chunkPages");
-      console.log("📄 Created chunks:", chunks.length, "chunks");
+      console.log("ðŸ“„ Created chunks:", chunks.length, "chunks");
 
       console.time("embedChunks");
       const embedded = await embedChunks(chunks);
       console.timeEnd("embedChunks");
-      console.log("📄 Generated embeddings for chunks");
+      console.log("ðŸ“„ Generated embeddings for chunks");
 
       console.time("saveDocumentChunks");
       await saveDocumentChunks({
@@ -156,22 +177,22 @@ export async function uploadAndIngest(formData: FormData) {
         })),
       });
       console.timeEnd("saveDocumentChunks");
-      console.log("📄 Saved document chunks to database");
+      console.log("ðŸ“„ Saved document chunks to database");
 
       // Generate document summary and suggested actions
-      console.log("📄 Retrieving document chunks for AI processing...");
+      console.log("ðŸ“„ Retrieving document chunks for AI processing...");
       const documentChunks = await getDocumentChunks({
         documentId: documentRecord.id,
       });
       console.log(
-        "📄 Retrieved document chunks for AI processing:",
+        "ðŸ“„ Retrieved document chunks for AI processing:",
         documentChunks.length
       );
 
       // Log sample content being sent to AI
       if (documentChunks.length > 0) {
         console.log(
-          `📄 Sample content for AI: ${documentChunks[0].content.slice(0, 200)}...`
+          `ðŸ“„ Sample content for AI: ${documentChunks[0].content.slice(0, 200)}...`
         );
       }
 
@@ -181,7 +202,7 @@ export async function uploadAndIngest(formData: FormData) {
         title: documentRecord.title,
       });
       console.timeEnd("generateDocumentSummary");
-      console.log("📄 Generated summary:", summaryResult.summary);
+      console.log("ðŸ“„ Generated summary:", summaryResult.summary);
       const elapsedMs = Date.now() - startedAtMs;
 
       // Save the summary to database
@@ -193,95 +214,147 @@ export async function uploadAndIngest(formData: FormData) {
         suggestedActions: summaryResult.suggestedActions,
       });
       console.timeEnd("createDocumentSummary");
-      console.log("📄 Saved document summary to database");
+      console.log("dY", "Saved document summary to database");
 
-      // Create a chat entry for this PDF upload
-      const chatId = generateUUID();
-      const initialMessage = {
-        id: generateUUID(),
-        role: "user" as const,
-        parts: [
-          {
-            type: "text" as const,
-            text: `PDF uploaded: ${documentRecord.title}`,
-          },
-        ],
-        createdAt: new Date(),
+            const targetChatId = options?.chatId ?? generateUUID();
+      const initialMessage =
+        options?.chatId !== undefined
+          ? null
+          : {
+              id: generateUUID(),
+              role: "user" as const,
+              parts: [
+                {
+                  type: "text" as const,
+                  text: `PDF uploaded: ${documentRecord.title}`,
+                },
+              ],
+              createdAt: new Date(),
+            };
+
+      if (!options?.chatId && initialMessage) {
+        console.time("generateTitleFromUserMessage");
+        const chatTitle = await generateTitleFromUserMessage({
+          message: initialMessage,
+        });
+        console.timeEnd("generateTitleFromUserMessage");
+        console.log("dY", "Generated chat title:", chatTitle);
+
+        console.time("saveChat");
+        await saveChat({
+          id: targetChatId,
+          userId: session.user.id,
+          title: chatTitle,
+          visibility: "private",
+        });
+        console.timeEnd("saveChat");
+        console.log("dY", "Saved chat to database:", targetChatId);
+      }
+
+      const sourceEntry = {
+        documentId: documentRecord.id,
+        title: documentRecord.title,
+        summary: summaryResult.summary,
+        mainTopics: summaryResult.mainTopics,
       };
 
-      // Generate a title for the chat based on the PDF
-      console.time("generateTitleFromUserMessage");
-      const chatTitle = await generateTitleFromUserMessage({
-        message: initialMessage,
-      });
-      console.timeEnd("generateTitleFromUserMessage");
-      console.log("📄 Generated chat title:", chatTitle);
+      // Get existing context (gracefully handle missing table)
+      const existingContext = await getChatContext({ chatId: targetChatId }).catch(() => null);
+      
+      // Option B: Just append source - no expensive merging
+      if (existingContext) {
+        // Check if this source already exists
+        const existingSourceIds = existingContext?.sources?.map(s => s.documentId) ?? [];
+        if (existingSourceIds.includes(documentRecord.id)) {
+          console.warn(`Source ${documentRecord.id} already exists in chat ${targetChatId}`);
+          // Continue anyway, but don't add duplicate to context
+        } else {
+          // Just append source - instant, no AI calls
+          const updatedSources = [
+            ...(existingContext.sources || []),
+            sourceEntry
+          ];
 
-      // Save the chat to database
-      console.time("saveChat");
-      await saveChat({
-        id: chatId,
-        userId: session.user.id,
-        title: chatTitle,
-        visibility: "private",
-      });
-      console.timeEnd("saveChat");
-      console.log("📄 Saved chat to database:", chatId);
+          // Save context (gracefully handles missing table)
+          try {
+            await upsertChatContext({
+              chatId: targetChatId,
+              sources: updatedSources,
+              globalSummary: "",  // Not used in Option B
+              globalTopics: [],    // Not used in Option B
+            });
+          } catch (error) {
+            console.warn("Failed to save chat context (table may not exist):", error);
+          }
+        }
+      } else {
+        // New chat - create initial context (just the source, no merging)
+        try {
+          await upsertChatContext({
+            chatId: targetChatId,
+            sources: [sourceEntry],
+            globalSummary: "",  // Not used in Option B
+            globalTopics: [],   // Not used in Option B
+          });
+        } catch (error) {
+          console.warn("Failed to save chat context (table may not exist):", error);
+        }
+      }
 
-      // Create and save the initial AI message with interactive PDF upload data
+      // Always create PDFUploadMessage part to show document card
+      // This allows users to see document structure and topics even when adding to existing chat
+      const pdfUploadPart = {
+        type: "data-pdfUpload" as const,
+        data: {
+          documentTitle: documentRecord.title,
+          pageCount: summaryResult.pageCount,
+          summary: summaryResult.summary,
+          mainTopics: summaryResult.mainTopics,
+          suggestedActions: summaryResult.suggestedActions,
+          documentId: documentRecord.id,
+          chatId: targetChatId,
+        },
+      };
+
       const aiMessageId = generateUUID();
-      const initialAiMessage = {
+      // When adding to existing chat, don't include delta message in text part (show as toast instead)
+      // For new chats, keep the status message
+      const assistantMessage = {
         id: aiMessageId,
-        chatId,
+        chatId: targetChatId,
         role: "assistant" as const,
-        parts: [
-          {
-            type: "text" as const,
-            text: `Done • analyzed ${summaryResult.pageCount} pages in ${formatDurationMs(elapsedMs)}`,
-          },
-          {
-            type: "data-pdfUpload" as const,
-            data: {
-              documentTitle: documentRecord.title,
-              pageCount: summaryResult.pageCount,
-              summary: summaryResult.summary,
-              mainTopics: summaryResult.mainTopics,
-              suggestedActions: summaryResult.suggestedActions,
-              documentId: documentRecord.id,
-              chatId,
-            },
-          },
-        ],
+        parts: options?.chatId !== undefined
+          ? [
+              // Only include PDFUploadMessage part when adding to existing chat
+              // Delta message will be shown as toast notification
+              pdfUploadPart,
+            ]
+          : [
+              // For new chats, include status message
+              {
+                type: "text" as const,
+                text: `Done • analyzed ${summaryResult.pageCount} pages in ${formatDurationMs(
+                  elapsedMs
+                )}`,
+              },
+              // Always include PDFUploadMessage part for document card display
+              pdfUploadPart,
+            ],
         attachments: [],
         createdAt: new Date(),
       };
 
-      console.log("🤖 Creating initial AI message:", {
+      console.log("dY- Creating AI message:", {
         id: aiMessageId,
-        chatId,
+        chatId: targetChatId,
         documentTitle: documentRecord.title,
         summaryLength: summaryResult.summary.length,
         suggestedActionsCount: summaryResult.suggestedActions.length,
       });
 
-      // Save the initial AI message to the database
-      try {
-        console.time("saveMessages(initialAiMessage)");
-        await saveMessages({
-          messages: [initialAiMessage],
-        });
-        console.timeEnd("saveMessages(initialAiMessage)");
-        console.log("✅ Initial AI message saved to database successfully");
-      } catch (dbError) {
-        console.error(
-          "❌ Failed to save initial AI message to database:",
-          dbError
-        );
-        throw new Error(
-          `Database save failed: ${dbError instanceof Error ? dbError.message : String(dbError)}`
-        );
-      }
-
+      await saveMessages({
+        messages: [assistantMessage],
+      });
       results.push({
         documentId: documentRecord.id,
         title: documentRecord.title,
@@ -290,14 +363,16 @@ export async function uploadAndIngest(formData: FormData) {
         summary: summaryResult.summary,
         suggestedActions: summaryResult.suggestedActions,
         pageCount: summaryResult.pageCount,
-        chatId,
+        chatId: targetChatId,
+        // Include delta message when adding to existing chat for toast notification
+        deltaMessage: options?.chatId !== undefined ? messageContext.deltaMessage : undefined,
       });
     } catch (dbError) {
       console.error(
-        "❌ Database operations failed during PDF upload:",
+        "âŒ Database operations failed during PDF upload:",
         dbError
       );
-      console.error("❌ Error details:", {
+      console.error("âŒ Error details:", {
         name: dbError instanceof Error ? dbError.name : "Unknown",
         message: dbError instanceof Error ? dbError.message : String(dbError),
         stack: dbError instanceof Error ? dbError.stack : undefined,
@@ -323,3 +398,6 @@ export async function uploadAndIngest(formData: FormData) {
   );
   return { documents: results };
 }
+
+
+

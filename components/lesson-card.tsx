@@ -32,16 +32,10 @@ interface Lesson {
 
 interface LessonCardProps {
   lesson: Lesson;
-  onStartChatQuiz: (lessonId: string) => void;
-  onGenerateArtifactQuiz: (lessonId: string) => void;
-  onSaveFlashcards: (lessonId: string) => void;
 }
 
 export function LessonCard({
   lesson,
-  onStartChatQuiz,
-  onGenerateArtifactQuiz,
-  onSaveFlashcards,
 }: LessonCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -138,35 +132,7 @@ export function LessonCard({
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex flex-wrap gap-2 pt-2">
-            <Button
-              className="flex items-center gap-2"
-              onClick={() => onStartChatQuiz(lesson.id)}
-              size="sm"
-            >
-              <Play className="h-4 w-4" />
-              Start Chat Quiz
-            </Button>
-            <Button
-              className="flex items-center gap-2"
-              onClick={() => onGenerateArtifactQuiz(lesson.id)}
-              size="sm"
-              variant="outline"
-            >
-              <Brain className="h-4 w-4" />
-              Generate Quiz
-            </Button>
-            <Button
-              className="flex items-center gap-2"
-              onClick={() => onSaveFlashcards(lesson.id)}
-              size="sm"
-              variant="outline"
-            >
-              <BookOpen className="h-4 w-4" />
-              Save Flashcards
-            </Button>
-          </div>
+          {/* Actions intentionally removed in game-focused pivot */}
         </div>
       </CardContent>
     </Card>
